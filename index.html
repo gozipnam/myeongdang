@@ -344,7 +344,8 @@
     </header>
     <div class="rp-actions">
       <button class="btn btn-primary" onclick="copyReport()">📋 보고서 텍스트 복사</button>
-      <span style="font-size:12px;color:var(--sub);align-self:center;">복사 후 카톡·메일에 붙여넣어 보고할 수 있어요</span>
+      <button class="btn btn-ghost" onclick="downloadPdf()">📄 PDF 다운로드</button>
+      <span style="font-size:12px;color:var(--sub);align-self:center;">텍스트는 카톡·메일용, PDF는 인쇄·공식 보고용</span>
     </div>
     <div class="rp" id="reportBody"></div>
   </div>
@@ -1289,7 +1290,7 @@ async function saveReportMemo(id,val){
 }
 function today(){ return new Date().toISOString().slice(0,10); }
 
-function reportHTML(s,c){
+function reportParts(s,c,forPdf){
   const b = s.bld || {};
   const bldRows = BLD_ITEMS.map(it=>{
     const v = b[it.key];
@@ -1297,11 +1298,12 @@ function reportHTML(s,c){
     return `<div class="bld-item"><span>${it.label}</span><span class="${cls}">${bldValLabel(it,v)}</span></div>`;
   }).join('');
   const remaining = CHECKLIST.filter((t,i)=>!(s.checks||[])[i]);
-  return `
+
+  const part1 = `
     <div class="rp-head">
       <div class="rp-eyebrow">스터디카페 창업 후보지 검토 보고서</div>
       <div class="rp-title">${esc(s.name)}</div>
-      <div class="rp-meta">${esc(s.addr||'주소 미입력')}${s.floor?` · ${s.floor}층`:''}${s.area?` · 전용 ${s.area}평`:''} &nbsp;|&nbsp; 작성일 ${today()}</div>
+      <div class="rp-meta">${esc(s.addr||'주소 미입력')}${s.floor?` · ${s.floor}층`:''}${s.area?` · 전용 ${s.area}평`:''} &nbsp;|&nbsp; 작성일 ${today()}${forPdf?' &nbsp;|&nbsp; 1/2':''}</div>
     </div>
 
     <div class="rp-verdict">
@@ -1349,7 +1351,15 @@ function reportHTML(s,c){
         return `<tr><td>${esc(cp.name)}${cp.memo?`<div style="font-size:11.5px;color:var(--sub);">${esc(cp.memo)}</div>`:''}</td><td>${esc(cp.open)||'—'}</td><td class="num">${cp.locker!=null?cp.locker+'%':'—'}</td><td class="num" style="font-size:12px;">${p(cp.p1h)} / ${p(cp.p100)} / ${p(cp.p4w)}</td></tr>`;
       }).join('')}
     </table>` : '<p style="color:var(--sub);">기록된 경쟁업체 없음</p>'}
+  `;
 
+  const memoBlock = forPdf
+    ? `<div style="font-size:13px;line-height:1.65;white-space:pre-wrap;border:1px solid var(--line);border-radius:9px;padding:10px 12px;min-height:60px;">${esc(s.reportMemo||'(작성된 의견 없음)')}</div>`
+    : `<div class="rp-memo-label">AI 체크에 대한 보완 의견, 현장에서 확인한 추가·수정 사항을 적으세요. 자동 저장되며 보고서 복사·PDF에 함께 들어갑니다.</div>
+    <textarea class="memo" style="min-height:110px;" placeholder="예) AI가 짚은 경쟁 밀집은 사실이나, 같은 블록 4곳 중 2곳은 사물함 점유율 40% 미만으로 확인됨. 전환 수요 노릴 여지 있음. 화장실 공사는 건물주 부담 협의 진행 중." onchange="saveReportMemo('${s.id}',this.value)">${esc(s.reportMemo||'')}</textarea>`;
+
+  const part2 = `
+    ${forPdf?`<div class="rp-head" style="padding-bottom:10px;margin-bottom:14px;"><div class="rp-eyebrow">스터디카페 창업 후보지 검토 보고서</div><div class="rp-meta"><b style="color:var(--ink);">${esc(s.name)}</b> &nbsp;|&nbsp; 작성일 ${today()} &nbsp;|&nbsp; 2/2</div></div>`:''}
     <div class="rp-sec">5. 수익성 시뮬레이션</div>
     ${(()=>{ const r = calcSim(s,c.fixed); return r ? `<table class="mini">
       <tr><td>가정: 좌석 ${r.seats}석 × 월 ${s.sim.fee}만원 × 점유율 ${s.sim.occ}%</td><td class="num"></td></tr>
@@ -1366,8 +1376,7 @@ function reportHTML(s,c){
       : '<p style="color:var(--sub);">AI 자동 조사 기록 없음 — 수정 화면에서 "주소로 자동 조사"를 실행하면 채워집니다.</p>'}
 
     <div class="rp-sec">7. 검토자 의견 (추가 확인·수정 사항)</div>
-    <div class="rp-memo-label">AI 체크에 대한 보완 의견, 현장에서 확인한 추가·수정 사항을 적으세요. 자동 저장되며 보고서 복사 시 함께 들어갑니다.</div>
-    <textarea class="memo" style="min-height:110px;" placeholder="예) AI가 짚은 경쟁 밀집은 사실이나, 같은 블록 4곳 중 2곳은 사물함 점유율 40% 미만으로 확인됨. 전환 수요 노릴 여지 있음. 화장실 공사는 건물주 부담 협의 진행 중." onchange="saveReportMemo('${s.id}',this.value)">${esc(s.reportMemo||'')}</textarea>
+    ${memoBlock}
 
     ${(s.interviews||[]).length ? `<div class="rp-sec">8. 학생 인터뷰 요약 (${s.interviews.length}건)</div>
       ${s.interviews.map(iv=>`<p>• <b>${esc(iv.who)||'응답자'}</b>${iv.q4?` — 중요 요소: ${esc(iv.q4)}`:''}${iv.q3?` / 통학 허용: ${esc(iv.q3)}`:''}${iv.q5?` / 기대: ${esc(iv.q5)}`:''}</p>`).join('')}` : ''}
@@ -1377,6 +1386,66 @@ function reportHTML(s,c){
 
     <div class="rp-footer">본 보고서의 상권 데이터와 AI 체크는 웹검색·직접 조사 기반 추정치를 포함하며, 계약 전 현장 실사와 공부서류 확인이 필요합니다.</div>
   `;
+
+  return { part1, part2 };
+}
+function reportHTML(s,c){
+  const p = reportParts(s,c,false);
+  return p.part1 + p.part2;
+}
+
+/* ---------- PDF 다운로드 ---------- */
+let pdfLibsPromise = null;
+function loadScript(src){
+  return new Promise((res,rej)=>{
+    const sc = document.createElement('script');
+    sc.src = src; sc.onload = res; sc.onerror = ()=>rej(new Error('script load fail: '+src));
+    document.head.appendChild(sc);
+  });
+}
+async function ensurePdfLibs(){
+  if(window.html2canvas && window.jspdf) return;
+  if(!pdfLibsPromise){
+    pdfLibsPromise = Promise.all([
+      loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'),
+      loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+    ]);
+  }
+  await pdfLibsPromise;
+}
+async function downloadPdf(){
+  const s = sites.find(x=>x.id===reportSiteId);
+  if(!s) return;
+  notify('PDF 생성 중… 몇 초 걸려요');
+  const holder = document.createElement('div');
+  try{
+    await ensurePdfLibs();
+    const c = calc(s);
+    const parts = reportParts(s, c, true);
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit:'mm', format:'a4' });
+    holder.style.cssText = 'position:absolute;left:-10000px;top:0;width:794px;background:#fff;';
+    document.body.appendChild(holder);
+    const pages = [parts.part1, parts.part2];
+    const PW = 210, PH = 297; // A4 mm
+    for(let i=0;i<pages.length;i++){
+      holder.innerHTML = `<div class="rp" style="border:none;border-radius:0;padding:36px 32px;">${pages[i]}</div>`;
+      const canvas = await html2canvas(holder, { scale:2, backgroundColor:'#ffffff' });
+      const img = canvas.toDataURL('image/jpeg', 0.92);
+      let w = PW, h = PW * canvas.height / canvas.width;
+      if(h > PH){ const r = PH / h; w *= r; h = PH; } // 한 페이지에 맞게 축소
+      if(i > 0) pdf.addPage();
+      pdf.addImage(img, 'JPEG', (PW - w) / 2, 0, w, h);
+    }
+    const fname = (s.name || '후보지').replace(/[\\\/:*?"<>|\s]+/g,'_') + '_검토보고서_' + today() + '.pdf';
+    pdf.save(fname);
+    notify('PDF를 다운로드했어요.');
+  }catch(e){
+    console.error(e);
+    notify('PDF 생성에 실패했어요 — 깃허브(브라우저) 버전에서 다시 시도해 보세요.');
+  }finally{
+    holder.remove();
+  }
 }
 
 function reportText(s,c){
