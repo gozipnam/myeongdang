@@ -985,9 +985,26 @@ async function autoResearch(){
   const addr = document.getElementById('f_addr').value.trim();
   const box = document.getElementById('researchResult');
   const btn = document.getElementById('researchBtn');
+  const apiHeaders = { "Content-Type": "application/json" };
   if(!IS_CLAUDE){
+    // 브라우저 버전: 조사 요청 문구를 복사해 주고 클로드를 새 탭으로 연다 (무료)
+    if(!addr){
+      notify('기본 정보의 "주소"를 먼저 입력해 주세요.');
+      document.getElementById('f_addr').focus();
+      return;
+    }
+    const req = `스터디카페 창업 후보지 상권 조사 부탁해.
+주소: ${addr}
+- 반경 500m 내 고등학교·중학교 이름과 개수
+- 학원 수 추정
+- 경쟁 스터디카페·독서실 목록 (오픈 시기·특징 포함)
+- 앤딩스터디카페가 반경 400m 안에 있는지 (있으면 입점 불가)
+- 주의해서 봐야 할 신호 (경쟁 밀집 / 전환 수요 기회 / 리스크) 2~4개`;
     box.style.display = 'block';
-    box.innerHTML = 'ℹ️ AI 자동 조사는 클로드(claude.ai) 안에서 열었을 때만 동작해요.<br>브라우저 버전에서는 클로드 채팅에 주소를 보내 조사 결과를 받아서 직접 입력해 주세요. 나머지 기능(저장·점수·보고서)은 모두 정상 동작합니다.';
+    box.innerHTML = `📋 <b>조사 요청 문구가 복사됐어요.</b><br>
+      아래 버튼으로 클로드를 열고 <b>붙여넣기 → 전송</b>하면 무료로 조사해 드립니다. 결과 숫자를 이 폼에 입력하세요.<br>
+      <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="window.open('https://claude.ai/new','_blank')">🤖 클로드 열기</button>`;
+    copyText(req, '조사 요청 문구를 복사했어요 — 클로드에 붙여넣어 전송하세요.');
     return;
   }
   if(!addr){
@@ -1018,7 +1035,7 @@ async function autoResearch(){
   try{
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders,
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 1000,
@@ -1026,6 +1043,10 @@ async function autoResearch(){
         tools: [{ "type": "web_search_20250305", "name": "web_search" }]
       })
     });
+    if(!response.ok){
+      if(response.status === 401 || response.status === 403) throw new Error('auth');
+      throw new Error('http ' + response.status);
+    }
     const data = await response.json();
     const text = (data.content || []).filter(i=>i.type==='text').map(i=>i.text).join('\n');
     const clean = text.replace(/```json|```/g,'').trim();
