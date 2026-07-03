@@ -366,6 +366,15 @@
 
 <script>
 const STORAGE_KEY = 'studycafe-sites-v1';
+/* 저장소 자동 감지:
+   - 클로드(claude.ai) 안: window.storage 사용
+   - 브라우저(GitHub Pages 등)에서 직접 열기: localStorage 사용 → 기기 브라우저에 영구 저장 */
+const IS_CLAUDE = !!window.storage;
+const store = window.storage || {
+  async get(k){ const v = localStorage.getItem('sc-' + k); return v == null ? null : { key:k, value:v }; },
+  async set(k,v){ localStorage.setItem('sc-' + k, v); return { key:k, value:v }; },
+  async delete(k){ localStorage.removeItem('sc-' + k); return { key:k, deleted:true }; }
+};
 let sites = [];
 let filter = 'all';
 let editingId = null;
@@ -511,7 +520,7 @@ const bldValLabel = (it,v) => v === 'good' ? it.opts[0] : v === 'mid' ? it.opts[
 /* ---------- 저장 ---------- */
 async function load(){
   try{
-    const r = await window.storage.get(STORAGE_KEY);
+    const r = await store.get(STORAGE_KEY);
     sites = r && r.value ? JSON.parse(r.value) : [];
   }catch(e){ sites = []; }
   // 구버전 데이터 보정
@@ -538,7 +547,7 @@ function persist(){
 async function doPersist(){
   for(let attempt = 0; attempt < 4; attempt++){
     try{
-      await window.storage.set(STORAGE_KEY, JSON.stringify(sites));
+      await store.set(STORAGE_KEY, JSON.stringify(sites));
       return;
     }catch(e){
       if(attempt < 3){
@@ -555,7 +564,7 @@ async function doPersist(){
 async function loadPhotos(id){
   if(photoCache[id]) return photoCache[id];
   try{
-    const r = await window.storage.get('scphotos-' + id);
+    const r = await store.get('scphotos-' + id);
     let arr = r && r.value ? JSON.parse(r.value) : [];
     // 구버전(문자열 배열) → {cat, img} 형태로 변환
     arr = arr.map(p => typeof p === 'string' ? { cat:'etc', img:p } : p);
@@ -567,7 +576,7 @@ async function savePhotosStore(id){
   const payload = JSON.stringify(photoCache[id] || []);
   for(let attempt = 0; attempt < 4; attempt++){
     try{
-      await window.storage.set('scphotos-' + id, payload);
+      await store.set('scphotos-' + id, payload);
       return;
     }catch(e){
       if(attempt < 3){
@@ -961,7 +970,7 @@ async function delSite(id){
   sites = sites.filter(x=>x.id!==id);
   if(openDetailId===id) openDetailId=null;
   delete photoCache[id];
-  try{ await window.storage.delete('scphotos-' + id); }catch(e){}
+  try{ await store.delete('scphotos-' + id); }catch(e){}
   await persist(); render();
   notify('후보지를 삭제했어요.');
 }
@@ -976,6 +985,11 @@ async function autoResearch(){
   const addr = document.getElementById('f_addr').value.trim();
   const box = document.getElementById('researchResult');
   const btn = document.getElementById('researchBtn');
+  if(!IS_CLAUDE){
+    box.style.display = 'block';
+    box.innerHTML = 'ℹ️ AI 자동 조사는 클로드(claude.ai) 안에서 열었을 때만 동작해요.<br>브라우저 버전에서는 클로드 채팅에 주소를 보내 조사 결과를 받아서 직접 입력해 주세요. 나머지 기능(저장·점수·보고서)은 모두 정상 동작합니다.';
+    return;
+  }
   if(!addr){
     notify('기본 정보의 "주소"를 먼저 입력해 주세요.');
     document.getElementById('f_addr').focus();
