@@ -752,7 +752,10 @@ function render(){
     </div>`;
   }).join('');
 
-  if(openDetailId) renderPhotos(openDetailId);
+  if(openDetailId){
+    renderPhotos(openDetailId);
+    if(svOpen === openDetailId) renderSurveyList(openDetailId);
+  }
 }
 
 function detailHTML(s,c){
@@ -816,6 +819,12 @@ function detailHTML(s,c){
         ${cp.memo?`<div style="margin-top:4px;">${esc(cp.memo)}</div>`:''}
       </div>`).join('') || '<div style="font-size:13px;color:var(--sub);">아직 기록된 경쟁업체가 없어요. 사물함이 얼마나 차 있는지가 실제 매출을 가늠하는 좋은 신호입니다.</div>'}
     <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="toggleAddForm('cpForm-${s.id}')">+ 경쟁업체 기록</button>
+    <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="openSurveyImport('${s.id}')">📥 조사 툴에서 불러오기</button>
+    <div class="addform ${svOpen===s.id?'open':''}" id="svForm-${s.id}">
+      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--sub);margin-bottom:4px;">후보지 주소의 동네 기준으로 자동 필터됩니다 (조사 툴에 좌표가 없어 반경 필터 대신 동 단위 적용). 검색어를 지우면 용인·성남 전체가 보여요</label>
+      <input class="inline-input" id="sv_q_${s.id}" value="${esc(svQuery)}" placeholder="매장명·동네·브랜드 검색 (예: 수지, 멘토즈, 죽전)" oninput="svQuery=this.value;renderSurveyList('${s.id}')">
+      <div id="sv_list_${s.id}" style="margin-top:8px;font-size:13px;color:var(--sub);">불러오는 중…</div>
+    </div>
     <div class="addform" id="cpForm-${s.id}">
       <div class="row">
         <div><label>업체명</label><input class="inline-input" id="cp_name_${s.id}" placeholder="○○스터디카페"></div>
@@ -879,7 +888,7 @@ function setFilter(f, el){
   el.classList.add('active');
   render();
 }
-function toggleDetail(id){ openDetailId = openDetailId === id ? null : id; compEditIdx = null; render(); }
+function toggleDetail(id){ openDetailId = openDetailId === id ? null : id; compEditIdx = null; svOpen = null; render(); }
 function openNaver(id){
   const s = sites.find(x=>x.id===id);
   if(!s || !s.addr) return;
@@ -1261,6 +1270,108 @@ function renderCompare(){
     <tbody>${bodyRows}</tbody>
   </table></div>
   <div style="font-size:12px;color:var(--sub);margin-top:8px;">초록 = 해당 항목에서 가장 유리한 후보지 (입점 불가 후보지는 우위 계산에서 제외). 최종 결정 전 각 후보지의 보고서에서 남은 확인 사항을 점검하세요.</div>`;
+}
+
+/* ---------- 조사 툴 연동 (gozipnam.github.io/studycafe-survey) ---------- */
+const SURVEY_BASE = 'https://gozipnam.github.io/studycafe-survey/';
+const SURVEY_REGIONS = [
+  { name:'용인시', path:'yongin/',   key:'yongin-studycafe-checklist-v1' },
+  { name:'성남시', path:'seongnam/', key:'seongnam-studycafe-checklist-v1' }
+];
+let surveyData = null;   // 연동 매장 목록 캐시
+let svOpen = null;       // 불러오기 패널이 열린 후보지 id
+let svQuery = '';        // 검색어
+
+async function loadSurveyData(){
+  if(surveyData) return surveyData;
+  const out = [];
+  for(const r of SURVEY_REGIONS){
+    // 같은 도메인이라 조사 툴의 localStorage를 직접 읽을 수 있음
+    let state = {};
+    try{ const v = localStorage.getItem(r.key); state = v ? JSON.parse(v) : {}; }catch(e){}
+    let venues = [];
+    try{
+      const html = await (await fetch(SURVEY_BASE + r.path + 'index.html')).text();
+      const mm = html.match(/const VENUES\s*=\s*\[([\s\S]*?)\n\];/);
+      if(mm) venues = new Function('return [' + mm[1] + ']')();
+    }catch(e){ console.error('조사 툴 목록 로드 실패', r.name, e); }
+    venues.forEach(v=>{
+      if(v.closed) return;
+      const st = state[v.id] || {};
+      const t = parseInt(st.lockerTotal,10), u = parseInt(st.lockerUsed,10);
+      const occ = (t>0 && !isNaN(u) && u>=0) ? Math.min(100, Math.round(u/t*100)) : null;
+      out.push({ region:r.name, name:v.name, area:v.area||'', district:v.district||'', brand:v.brand||'',
+                 occ, date:st.lockerDate||'', smemo:st.memo||'', target:!!st.target });
+    });
+  }
+  surveyData = out;
+  return out;
+}
+function addrKeyword(addr){
+  // 주소에서 동(洞) → 없으면 구(區) 추출: "수지구 풍덕천동 712-1" → "풍덕천동", "상현1동" → "상현동"
+  if(!addr) return '';
+  const tokens = addr.split(/\s+/);
+  const dong = tokens.find(t => /^[가-힣]{1,8}\d{0,2}[동읍면]$/.test(t));
+  if(dong) return dong.replace(/\d+(?=[동읍면]$)/,'');
+  const gu = tokens.find(t => /^[가-힣]{1,8}[구군]$/.test(t));
+  return gu || '';
+}
+async function openSurveyImport(siteId){
+  if(IS_CLAUDE){
+    notify('조사 툴 연동은 깃허브(gozipnam.github.io) 버전에서 열었을 때 동작해요.');
+    return;
+  }
+  if(svOpen === siteId){ svOpen = null; render(); return; }
+  const s = sites.find(x=>x.id===siteId);
+  svOpen = siteId;
+  svQuery = addrKeyword(s?.addr); // 주소 기준 동네 자동 필터
+  render();
+  await loadSurveyData();
+  renderSurveyList(siteId);
+}
+function renderSurveyList(siteId){
+  const box = document.getElementById('sv_list_' + siteId);
+  if(!box) return;
+  if(!surveyData){ box.textContent = '불러오는 중…'; return; }
+  if(!surveyData.length){
+    box.innerHTML = '조사 툴 매장 목록을 불러오지 못했어요. 이 툴이 gozipnam.github.io 에 올라가 있는지, 조사 툴에서 점유율을 기록한 같은 기기·브라우저인지 확인해 주세요.';
+    return;
+  }
+  const q = svQuery.trim().toLowerCase();
+  const filterFn = qq => surveyData.filter(v => !qq || (v.name + v.area + v.district + v.brand + v.region).toLowerCase().includes(qq));
+  let list = filterFn(q);
+  // "상현1동"처럼 행정동 숫자가 붙은 경우 "상현동"으로 재시도
+  if(!list.length && /\d+동$/.test(q)) list = filterFn(q.replace(/\d+동$/,'동'));
+  // 점유율 기록 있는 매장 우선 정렬
+  list.sort((a,b)=> (b.occ!=null) - (a.occ!=null));
+  const total = list.length;
+  list = list.slice(0, 15);
+  const s = sites.find(x=>x.id===siteId);
+  const existing = new Set((s?.competitors||[]).map(c=>c.name));
+  box.innerHTML = list.map(v=>{
+    const i = surveyData.indexOf(v);
+    const added = existing.has(v.name);
+    return `<div class="subcard" style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+      <div style="min-width:0;">
+        <b>${esc(v.name)}</b>${v.target?' ⭐':''}
+        <div class="meta">${esc(v.region)} ${esc(v.area)} · ${esc(v.brand)} · ${v.occ!=null?`사물함 <b>${v.occ}%</b>${v.date?` (${esc(v.date)})`:''}`:'점유율 미조사'}</div>
+      </div>
+      <button class="btn ${added?'btn-ghost':'btn-primary'} btn-sm" style="flex:none;" ${added?'disabled':''} onclick="importSurveyCafe('${siteId}',${i})">${added?'추가됨':'추가'}</button>
+    </div>`;
+  }).join('') + (total > 15 ? `<div style="font-size:12px;color:var(--sub);">외 ${total-15}곳 — 검색어로 좁혀보세요</div>` : '') || '<div style="font-size:13px;color:var(--sub);">검색 결과가 없어요.</div>';
+}
+async function importSurveyCafe(siteId, idx){
+  const s = sites.find(x=>x.id===siteId); if(!s) return;
+  const v = surveyData?.[idx]; if(!v) return;
+  if((s.competitors||[]).some(c=>c.name===v.name)){ notify('이미 추가된 매장이에요.'); return; }
+  if(!s.competitors) s.competitors = [];
+  s.competitors.push({
+    name: v.name, open: '', locker: v.occ,
+    memo: [v.brand, v.area, v.date?`점유율 기록 ${v.date}`:'', v.smemo].filter(Boolean).join(' · ') + ' (조사툴 연동)'
+  });
+  await persist();
+  render();
+  notify(`${v.name} 추가 완료${v.occ!=null?` — 사물함 ${v.occ}%`:''}`);
 }
 
 /* ---------- 보고서 ---------- */
