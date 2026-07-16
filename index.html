@@ -808,16 +808,18 @@ function detailHTML(s,c){
     ${simResultHTML(s,c)}
 
     <div class="sec-title">주변 스터디카페 동향 (사물함 점유율 = 잘 되는지 지표)</div>
-    ${(s.competitors||[]).map((cp,i)=>`
+    ${(()=>{
+      const arr = (s.competitors||[]).map((cp,i)=>({cp,i}));
+      arr.sort((a,b)=> (b.cp.locker ?? -1) - (a.cp.locker ?? -1)); // 점유율 높은 순
+      return arr.map(({cp,i})=>`
       <div class="subcard">
         <div class="head"><span>${esc(cp.name)||'이름 없음'}</span><span><button class="del" style="color:var(--teal);margin-right:10px;" onclick="editCompetitor('${s.id}',${i})">수정</button><button class="del" onclick="delCompetitor('${s.id}',${i})">삭제</button></span></div>
         <div class="meta">
-          오픈 ${esc(cp.open)||'미확인'} ·
           사물함 점유율 ${cp.locker!=null?`<span class="locker-bar"><i style="width:${Math.min(100,cp.locker)}%"></i></span><b>${cp.locker}%</b>`:'미확인'}
+          · 이용 ${cp.lockerUsed!=null&&cp.lockerTotal!=null?`<b>${cp.lockerUsed}/${cp.lockerTotal}</b>개`:'—'}
         </div>
-        ${(cp.p1h!=null||cp.p100!=null||cp.p4w!=null)?`<div class="meta">요금: 1시간 ${cp.p1h!=null?cp.p1h.toLocaleString()+'원':'—'} · 100시간권 ${cp.p100!=null?cp.p100.toLocaleString()+'원':'—'} · 4주권 ${cp.p4w!=null?cp.p4w.toLocaleString()+'원':'—'}</div>`:''}
-        ${cp.memo?`<div style="margin-top:4px;">${esc(cp.memo)}</div>`:''}
-      </div>`).join('') || '<div style="font-size:13px;color:var(--sub);">아직 기록된 경쟁업체가 없어요. 사물함이 얼마나 차 있는지가 실제 매출을 가늠하는 좋은 신호입니다.</div>'}
+      </div>`).join('');
+    })() || '<div style="font-size:13px;color:var(--sub);">아직 기록된 경쟁업체가 없어요. 사물함이 얼마나 차 있는지가 실제 매출을 가늠하는 좋은 신호입니다.</div>'}
     <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="toggleAddForm('cpForm-${s.id}')">+ 경쟁업체 기록</button>
     <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="openSurveyImport('${s.id}')">📥 조사 툴에서 불러오기</button>
     <div class="addform ${svOpen===s.id?'open':''}" id="svForm-${s.id}">
@@ -829,7 +831,8 @@ function detailHTML(s,c){
       <div class="row">
         <div><label>업체명</label><input class="inline-input" id="cp_name_${s.id}" placeholder="○○스터디카페"></div>
         <div><label>오픈 시기</label><input class="inline-input" id="cp_open_${s.id}" placeholder="예: 2023.05"></div>
-        <div><label>사물함 점유율 (%)</label><input class="inline-input" id="cp_locker_${s.id}" type="number" min="0" max="100" placeholder="70"></div>
+        <div><label>사물함 이용 수</label><input class="inline-input" id="cp_lu_${s.id}" type="number" min="0" placeholder="28"></div>
+        <div><label>사물함 총 개수</label><input class="inline-input" id="cp_lt_${s.id}" type="number" min="0" placeholder="40"></div>
         <div><label>1시간 일일권 (원)</label><input class="inline-input" id="cp_p1h_${s.id}" type="number" placeholder="2000"></div>
         <div><label>100시간 시간권 (원)</label><input class="inline-input" id="cp_p100_${s.id}" type="number" placeholder="130000"></div>
         <div><label>4주 기간권 (원)</label><input class="inline-input" id="cp_p4w_${s.id}" type="number" placeholder="150000"></div>
@@ -919,8 +922,12 @@ async function addCompetitor(id){
   const g = f => document.getElementById(f + '_' + id)?.value.trim() || '';
   const name = g('cp_name');
   if(!name){ notify('업체명을 입력해 주세요.'); return; }
+  const lu = num(g('cp_lu')), lt = num(g('cp_lt'));
+  const prev = (compEditIdx != null) ? s.competitors[compEditIdx] : null;
+  const locker = (lt > 0 && lu != null && lu >= 0) ? Math.min(100, Math.round(lu / lt * 100)) : (prev?.locker ?? null);
   const entry = {
-    name, open:g('cp_open'), locker:num(g('cp_locker')),
+    name, open:g('cp_open'),
+    locker, lockerUsed: lu, lockerTotal: lt,
     p1h:num(g('cp_p1h')), p100:num(g('cp_p100')), p4w:num(g('cp_p4w')),
     memo:g('cp_memo')
   };
@@ -938,7 +945,8 @@ function editCompetitor(id, i){
   const cp = s.competitors[i]; if(!cp) return;
   compEditIdx = i;
   const set = (f,v)=>{ const el = document.getElementById(f + '_' + id); if(el) el.value = v==null?'':v; };
-  set('cp_name', cp.name); set('cp_open', cp.open); set('cp_locker', cp.locker);
+  set('cp_name', cp.name); set('cp_open', cp.open);
+  set('cp_lu', cp.lockerUsed); set('cp_lt', cp.lockerTotal);
   set('cp_p1h', cp.p1h); set('cp_p100', cp.p100); set('cp_p4w', cp.p4w);
   set('cp_memo', cp.memo);
   const form = document.getElementById('cpForm-' + id);
@@ -1332,9 +1340,11 @@ async function loadSurveyData(){
       if(v.closed) return;
       const st = state[v.id] || {};
       const t = parseInt(st.lockerTotal,10), u = parseInt(st.lockerUsed,10);
-      const occ = (t>0 && !isNaN(u) && u>=0) ? Math.min(100, Math.round(u/t*100)) : null;
+      const valid = (t>0 && !isNaN(u) && u>=0);
+      const occ = valid ? Math.min(100, Math.round(u/t*100)) : null;
       out.push({ region:r.name, name:v.name, area:v.area||'', district:v.district||'', brand:v.brand||'',
-                 occ, date:st.lockerDate||'', smemo:st.memo||'', target:!!st.target });
+                 occ, used: valid ? u : null, total: valid ? t : null,
+                 date:st.lockerDate||'', smemo:st.memo||'', target:!!st.target });
     });
   }
   surveyData = out;
@@ -1399,7 +1409,7 @@ async function importSurveyCafe(siteId, idx){
   if((s.competitors||[]).some(c=>c.name===v.name)){ notify('이미 추가된 매장이에요.'); return; }
   if(!s.competitors) s.competitors = [];
   s.competitors.push({
-    name: v.name, open: '', locker: v.occ,
+    name: v.name, open: '', locker: v.occ, lockerUsed: v.used, lockerTotal: v.total,
     memo: [v.brand, v.area, v.date?`점유율 기록 ${v.date}`:'', v.smemo].filter(Boolean).join(' · ') + ' (조사툴 연동)'
   });
   await persist();
@@ -1487,12 +1497,15 @@ function reportParts(s,c,forPdf){
     <div class="bld-grid">${bldRows}</div>
     <p style="color:var(--sub);font-size:12.5px;margin-top:5px;">엘리베이터 ${s.elev==='y'?'있음':'없음'} · 주차 ${s.park==='y'?'가능':'불가'} · 24시간 운영 ${s.h24==='y'?'가능':s.h24==='n'?'불가':'미확인'}</p>
 
-    <div class="rp-sec">4. 경쟁업체 동향</div>
+    <div class="rp-sec">4. 경쟁업체 동향 (점유율 높은 순)</div>
     ${(s.competitors||[]).length ? `<table class="mini">
-      <tr><th>업체명</th><th>오픈</th><th style="text-align:right;">사물함</th><th style="text-align:right;">1h / 100h / 4주</th></tr>
-      ${s.competitors.map(cp=>{
+      <tr><th>업체명</th><th>오픈</th><th style="text-align:right;">사물함 (이용/총)</th><th style="text-align:right;">1h / 100h / 4주</th></tr>
+      ${[...s.competitors].sort((a,b)=>(b.locker??-1)-(a.locker??-1)).map(cp=>{
         const p = v => v!=null ? (v>=10000 ? (v/10000)+'만' : v.toLocaleString()+'원') : '—';
-        return `<tr><td>${esc(cp.name)}${cp.memo?`<div style="font-size:11.5px;color:var(--sub);">${esc(cp.memo)}</div>`:''}</td><td>${esc(cp.open)||'—'}</td><td class="num">${cp.locker!=null?cp.locker+'%':'—'}</td><td class="num" style="font-size:12px;">${p(cp.p1h)} / ${p(cp.p100)} / ${p(cp.p4w)}</td></tr>`;
+        const lockerCell = cp.locker!=null
+          ? `${cp.locker}%${cp.lockerUsed!=null&&cp.lockerTotal!=null?` (${cp.lockerUsed}/${cp.lockerTotal})`:''}`
+          : '—';
+        return `<tr><td>${esc(cp.name)}${cp.memo?`<div style="font-size:11.5px;color:var(--sub);">${esc(cp.memo)}</div>`:''}</td><td>${esc(cp.open)||'—'}</td><td class="num">${lockerCell}</td><td class="num" style="font-size:12px;">${p(cp.p1h)} / ${p(cp.p100)} / ${p(cp.p4w)}</td></tr>`;
       }).join('')}
     </table>` : '<p style="color:var(--sub);">기록된 경쟁업체 없음</p>'}
   `;
@@ -1618,10 +1631,11 @@ function reportText(s,c){
   if((s.competitors||[]).length){
     lines.push(``);
     lines.push(`4. 경쟁업체 동향`);
-    s.competitors.forEach(cp=>{
+    [...s.competitors].sort((a,b)=>(b.locker??-1)-(a.locker??-1)).forEach(cp=>{
       const p = v => v!=null ? (v>=10000 ? (v/10000)+'만' : v.toLocaleString()+'원') : '?';
+      const lk = cp.locker!=null ? `${cp.locker}%${cp.lockerUsed!=null&&cp.lockerTotal!=null?` (${cp.lockerUsed}/${cp.lockerTotal})`:''}` : '?';
       const price = (cp.p1h!=null||cp.p100!=null||cp.p4w!=null) ? ` | 1h ${p(cp.p1h)} · 100h ${p(cp.p100)} · 4주 ${p(cp.p4w)}` : '';
-      lines.push(`- ${cp.name} | 오픈 ${cp.open||'?'} | 사물함 ${cp.locker!=null?cp.locker+'%':'?'}${price}${cp.memo?` | ${cp.memo}`:''}`);
+      lines.push(`- ${cp.name} | 오픈 ${cp.open||'?'} | 사물함 ${lk}${price}${cp.memo?` | ${cp.memo}`:''}`);
     });
   }
   const sim = calcSim(s,c.fixed);
