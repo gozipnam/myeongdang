@@ -1457,7 +1457,7 @@ function reportParts(s,c,forPdf){
     <div class="rp-head">
       <div class="rp-eyebrow">스터디카페 창업 후보지 검토 보고서</div>
       <div class="rp-title">${esc(s.name)}</div>
-      <div class="rp-meta">${esc(s.addr||'주소 미입력')}${s.floor?` · ${s.floor}층`:''}${s.area?` · 전용 ${s.area}평`:''} &nbsp;|&nbsp; 작성일 ${today()}${forPdf?' &nbsp;|&nbsp; 1/2':''}</div>
+      <div class="rp-meta">${esc(s.addr||'주소 미입력')}${s.floor?` · ${s.floor}층`:''}${s.area?` · 전용 ${s.area}평`:''} &nbsp;|&nbsp; 작성일 ${today()}</div>
     </div>
 
     <div class="rp-verdict">
@@ -1516,7 +1516,7 @@ function reportParts(s,c,forPdf){
     <textarea class="memo" style="min-height:110px;" placeholder="예) AI가 짚은 경쟁 밀집은 사실이나, 같은 블록 4곳 중 2곳은 사물함 점유율 40% 미만으로 확인됨. 전환 수요 노릴 여지 있음. 화장실 공사는 건물주 부담 협의 진행 중." onchange="saveReportMemo('${s.id}',this.value)">${esc(s.reportMemo||'')}</textarea>`;
 
   const part2 = `
-    ${forPdf?`<div class="rp-head" style="padding-bottom:10px;margin-bottom:14px;"><div class="rp-eyebrow">스터디카페 창업 후보지 검토 보고서</div><div class="rp-meta"><b style="color:var(--ink);">${esc(s.name)}</b> &nbsp;|&nbsp; 작성일 ${today()} &nbsp;|&nbsp; 2/2</div></div>`:''}
+    ${forPdf?`<div class="rp-head" style="padding-bottom:10px;margin-bottom:14px;"><div class="rp-eyebrow">스터디카페 창업 후보지 검토 보고서</div><div class="rp-meta"><b style="color:var(--ink);">${esc(s.name)}</b> &nbsp;|&nbsp; 작성일 ${today()}</div></div>`:''}
     <div class="rp-sec">5. 수익성 시뮬레이션</div>
     ${(()=>{ const r = calcSim(s,c.fixed); return r ? `<table class="mini">
       <tr><td>가정: 좌석 ${r.seats}석 × 월 ${s.sim.fee}만원 × 점유율 ${s.sim.occ}%</td><td class="num"></td></tr>
@@ -1570,6 +1570,26 @@ async function ensurePdfLibs(){
   }
   await pdfLibsPromise;
 }
+function addCanvasPaged(pdf, canvas, isFirstPage){
+  // 캔버스를 A4 높이 단위로 잘라 여러 페이지에 원본 크기로 배치
+  const PW = 210, PH = 297;
+  const pageHpx = Math.floor(canvas.width * (PH / PW));
+  let y = 0, first = isFirstPage;
+  while(y < canvas.height){
+    const sliceH = Math.min(pageHpx, canvas.height - y);
+    const slice = document.createElement('canvas');
+    slice.width = canvas.width;
+    slice.height = sliceH;
+    const ctx = slice.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, slice.width, slice.height);
+    ctx.drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+    if(!first) pdf.addPage();
+    first = false;
+    pdf.addImage(slice.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, PW, sliceH * (PW / canvas.width));
+    y += sliceH;
+  }
+}
 async function downloadPdf(){
   const s = sites.find(x=>x.id===reportSiteId);
   if(!s) return;
@@ -1584,15 +1604,10 @@ async function downloadPdf(){
     holder.style.cssText = 'position:absolute;left:-10000px;top:0;width:794px;background:#fff;';
     document.body.appendChild(holder);
     const pages = [parts.part1, parts.part2];
-    const PW = 210, PH = 297; // A4 mm
     for(let i=0;i<pages.length;i++){
       holder.innerHTML = `<div class="rp" style="border:none;border-radius:0;padding:36px 32px;">${pages[i]}</div>`;
       const canvas = await html2canvas(holder, { scale:2, backgroundColor:'#ffffff' });
-      const img = canvas.toDataURL('image/jpeg', 0.92);
-      let w = PW, h = PW * canvas.height / canvas.width;
-      if(h > PH){ const r = PH / h; w *= r; h = PH; } // 한 페이지에 맞게 축소
-      if(i > 0) pdf.addPage();
-      pdf.addImage(img, 'JPEG', (PW - w) / 2, 0, w, h);
+      addCanvasPaged(pdf, canvas, i === 0); // 파트2는 항상 새 페이지에서 시작
     }
     const fname = (s.name || '후보지').replace(/[\\\/:*?"<>|\s]+/g,'_') + '_검토보고서_' + today() + '.pdf';
     pdf.save(fname);
