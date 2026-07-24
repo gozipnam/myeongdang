@@ -845,10 +845,12 @@ function render(){
       <div class="card-actions">
         <button class="btn btn-ghost btn-sm" onclick="toggleDetail('${s.id}')">${open?'접기':'상세 · 현장조사'}</button>
         <button class="btn btn-ghost btn-sm" onclick="openReport('${s.id}')">보고서</button>
+        ${s.addr?`<button class="btn btn-ghost btn-sm" onclick="toggleSiteMap('${s.id}')">🗺️ 지도</button>`:''}
         ${s.addr?`<button class="btn btn-ghost btn-sm" onclick="openNaver('${s.id}')">네이버 지도</button>`:''}
         <button class="btn btn-ghost btn-sm" onclick="openForm('${s.id}')">수정</button>
         <button class="btn btn-danger btn-sm ${pendingDelete===s.id?'confirm':''}" onclick="delSite('${s.id}')">${pendingDelete===s.id?'정말 삭제할까요?':'삭제'}</button>
       </div>
+      <div id="siteMap-${s.id}" style="display:none;height:320px;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin-top:12px;"></div>
       <div class="detail ${open?'open':''}">${open ? detailHTML(s,c) : ''}</div>
     </div>`;
   }).join('');
@@ -997,6 +999,30 @@ function openNaver(id){
   const s = sites.find(x=>x.id===id);
   if(!s || !s.addr) return;
   window.open('https://map.naver.com/p/search/' + encodeURIComponent(s.addr), '_blank');
+}
+let siteMapOpen = null;
+async function toggleSiteMap(id){
+  const box = document.getElementById('siteMap-' + id);
+  if(!box) return;
+  if(siteMapOpen === id){ siteMapOpen = null; box.style.display='none'; return; }
+  siteMapOpen = id;
+  box.style.display = 'block';
+  const s = sites.find(x=>x.id===id);
+  box.innerHTML = '<div style="padding:20px;text-align:center;color:var(--sub);font-size:13px;">지도 준비 중…</div>';
+  // 후보지 좌표
+  let center = (s.lat && s.lng) ? {lat:s.lat, lng:s.lng} : await geocode(s.addr);
+  if(!center){ box.innerHTML = '<div style="padding:20px;text-align:center;color:var(--sub);font-size:13px;">후보지 주소의 좌표를 찾지 못했어요.</div>'; return; }
+  // 후보지 좌표 저장(다음번 빠르게)
+  if(!s.lat){ s.lat = center.lat; s.lng = center.lng; persist(); }
+  const pins = [{ lat:center.lat, lng:center.lng, label:`📍 ${s.name}`, color:'#CE4A36', sub:`후보지 · ${s.addr}` }];
+  // 주변 조사 매장(좌표 있는 것) 함께 표시
+  cafes.filter(c=>c.lat && c.lng).forEach(c=>{
+    const o = occOf(c);
+    pins.push({ lat:c.lat, lng:c.lng, label:`${c.name}${o!=null?` ${o}%`:''}`,
+      color: o==null?'#8A8F98': o>=60?'#0E7A5F': o<=20?'#B07C10':'#4A5568',
+      sub:`${c.name} · 사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}` });
+  });
+  renderMap('siteMap-' + id, pins, center);
 }
 function toggleAddForm(id){ document.getElementById(id)?.classList.toggle('open'); }
 
@@ -1409,6 +1435,72 @@ function renderCompare(){
 
 /* ---------- 조사 툴 연동 (gozipnam.github.io/studycafe-survey) ---------- */
 const SURVEY_BASE = 'https://gozipnam.github.io/studycafe-survey/';
+
+/* ---------- 네이버 지도 ---------- */
+const NAVER_MAP_KEY = 'i3zfsrm5kz';
+let naverLoaded = null;
+function ensureNaverMap(){
+  if(window.naver && window.naver.maps) return Promise.resolve();
+  if(!naverLoaded){
+    naverLoaded = new Promise((res,rej)=>{
+      const sc = document.createElement('script');
+      sc.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${NAVER_MAP_KEY}&submodules=geocoder`;
+      sc.onload = ()=> res();
+      sc.onerror = ()=> rej(new Error('naver map load fail'));
+      document.head.appendChild(sc);
+    });
+  }
+  return naverLoaded;
+}
+// 주소 → 좌표 (지도 로드 후 클라이언트 지오코더 사용)
+function geocode(addr){
+  return new Promise(async (resolve)=>{
+    try{
+      await ensureNaverMap();
+      if(!(window.naver && naver.maps && naver.maps.Service)){ resolve(null); return; }
+      naver.maps.Service.geocode({ query: addr }, (status, resp)=>{
+        if(status !== naver.maps.Service.Status.OK || !resp.v2.addresses.length){ resolve(null); return; }
+        const a = resp.v2.addresses[0];
+        resolve({ lat: parseFloat(a.y), lng: parseFloat(a.x) });
+      });
+    }catch(e){ resolve(null); }
+  });
+}
+// 지도 렌더: container에 pins[{lat,lng,label,color,sub}] 표시
+async function renderMap(containerId, pins, center){
+  const box = document.getElementById(containerId);
+  if(!box) return;
+  const valid = pins.filter(p=>p.lat && p.lng);
+  if(!valid.length){ box.innerHTML = '<div style="padding:20px;text-align:center;color:var(--sub);font-size:13px;">지도에 표시할 좌표가 아직 없어요. 매장에 주소를 입력하면 좌표가 생깁니다.</div>'; return; }
+  try{
+    await ensureNaverMap();
+    box.innerHTML = '';
+    const c = center || { lat: valid[0].lat, lng: valid[0].lng };
+    const map = new naver.maps.Map(box, { center: new naver.maps.LatLng(c.lat, c.lng), zoom: 15 });
+    const bounds = new naver.maps.LatLngBounds();
+    valid.forEach(p=>{
+      const pos = new naver.maps.LatLng(p.lat, p.lng);
+      const mk = new naver.maps.Marker({
+        position: pos, map,
+        icon: {
+          content: `<div style="transform:translate(-50%,-100%);white-space:nowrap;">
+            <div style="background:${p.color||'#0E7A5F'};color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.3);">${esc(p.label||'')}</div>
+            <div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid ${p.color||'#0E7A5F'};margin:0 auto;"></div>
+          </div>`,
+          anchor: new naver.maps.Point(0,0)
+        }
+      });
+      if(p.sub){
+        const info = new naver.maps.InfoWindow({ content:`<div style="padding:8px 10px;font-size:12.5px;">${esc(p.sub)}</div>` });
+        naver.maps.Event.addListener(mk,'click',()=>{ info.open(map, mk); });
+      }
+      bounds.extend(pos);
+    });
+    if(valid.length > 1) map.fitBounds(bounds);
+  }catch(e){
+    box.innerHTML = '<div style="padding:20px;text-align:center;color:var(--red);font-size:13px;">지도를 불러오지 못했어요. 네이버 클라우드 콘솔에서 Web 서비스 URL에 gozipnam.github.io 가 등록됐는지 확인해 주세요.</div>';
+  }
+}
 const SURVEY_REGIONS = [
   { name:'용인시', path:'yongin/',   key:'yongin-studycafe-checklist-v1' },
   { name:'성남시', path:'seongnam/', key:'seongnam-studycafe-checklist-v1' }
@@ -2067,16 +2159,19 @@ function subscribeSurvey(){
 
 /* ---- 기존 조사 툴(용인·성남) 데이터 1회 이관 ---- */
 const SURVEY_MIGRATE = [
-  { rid:'gyeonggi-yongin',   name:'경기 용인시', path:'yongin/',   key:'yongin-studycafe-checklist-v1',   order:10 },
-  { rid:'gyeonggi-seongnam', name:'경기 성남시', path:'seongnam/', key:'seongnam-studycafe-checklist-v1', order:11 }
+  { rid:'gyeonggi-yongin',   name:'경기 용인시',   path:'yongin/',         key:'yongin-studycafe-checklist-v1',    order:10 },
+  { rid:'gyeonggi-seongnam', name:'경기 성남시',   path:'seongnam/',       key:'seongnam-studycafe-checklist-v1',  order:11 },
+  { rid:'seoul-gangbuk',     name:'서울 강북구',   path:'seoul/gangbuk/',  key:'gangbuk-studycafe-checklist-v1',   order:20, tag:'미아사거리' },
+  { rid:'seoul-yangcheon',   name:'서울 양천구',   path:'seoul/yangcheon/',key:'yangcheon-studycafe-checklist-v1', order:21, tag:'목동역' }
 ];
 async function maybeMigrateSurvey(){
   if(window._svMigrated) return;
   window._svMigrated = true;
-  if(cafes.length > 0 || localStorage.getItem('sc-survey-migrated-v1')) return;
   try{
-    let moved = 0;
+    const existingRegions = new Set(regions.map(r=>r.id));
+    let moved = 0, addedRegions = 0;
     for(const r of SURVEY_MIGRATE){
+      if(existingRegions.has(r.rid)) continue; // 이미 있는 지역은 건너뜀 (중복 방지)
       let state = {};
       try{ const v = localStorage.getItem(r.key); state = v ? JSON.parse(v) : {}; }catch(e){}
       let venues = [];
@@ -2085,12 +2180,12 @@ async function maybeMigrateSurvey(){
         const mm = html.match(/const VENUES\s*=\s*\[([\s\S]*?)\n\];/);
         if(mm) venues = new Function('return [' + mm[1] + ']')();
       }catch(e){ continue; }
+      if(!venues.length) continue;
       const batch = db.batch();
-      // 구(district)별 매장 수 요약 → 지역 카드 표시용
       const dCount = {};
       venues.forEach(v=>{ if(!v.closed && v.district){ dCount[v.district]=(dCount[v.district]||0)+1; } });
       const districts = Object.entries(dCount).sort((a,b)=>b[1]-a[1]).map(([d,n])=>`${d} ${n}`).join(' · ');
-      batch.set(db.collection('regions').doc(r.rid), { id:r.rid, name:r.name, order:r.order, districts });
+      batch.set(db.collection('regions').doc(r.rid), { id:r.rid, name:r.name, order:r.order, districts, tag:r.tag||'' });
       venues.forEach(v=>{
         if(v.closed) return;
         const st = state[v.id] || {};
@@ -2105,16 +2200,16 @@ async function maybeMigrateSurvey(){
         moved++;
       });
       await batch.commit();
+      addedRegions++;
     }
-    localStorage.setItem('sc-survey-migrated-v1','1');
-    if(moved) notify(`기존 조사 매장 ${moved}곳을 클라우드로 옮겼어요.`);
+    if(addedRegions) notify(`조사 지역 ${addedRegions}곳(매장 ${moved}곳)을 클라우드로 옮겼어요.`);
   }catch(e){ console.error('조사 이관 실패', e); }
 }
 
 /* ---- 렌더 ---- */
 function renderSurvey(){
   const v = document.getElementById('surveyView');
-  if(svRegionId) renderCafeList(v);
+  if(svRegionId){ renderCafeList(v); drawSurveyMap(); }
   else renderRegionList(v);
 }
 const VENDOR_COLOR = {'픽코':'#C0433B','제로아이즈':'#2F6DB5','와우플':'#7A4FA3','SSAMCAFE':'#C77A1E','스터디모아':'#2E8B6F','스터디큐브':'#4A5568','기타':'#8A8F98'};
@@ -2196,7 +2291,9 @@ function renderCafeList(v){
       <button class="chip ${svFilter==='target'?'active':''}" onclick="setSvFilter('target')">⭐ 전환 타깃</button>
       <button class="chip ${svFilter==='nonres'?'active':''}" onclick="setSvFilter('nonres')">🏠 비상주 추천</button>
       <button class="chip ${svFilter==='todo'?'active':''}" onclick="setSvFilter('todo')">미조사</button>
+      <button class="chip" style="margin-left:auto;" onclick="toggleSvMap()">🗺️ 지도</button>
     </div>
+    <div id="svMap" style="display:${svMapOpen?'block':'none'};height:340px;border-radius:14px;overflow:hidden;border:1px solid var(--line);margin-bottom:14px;"></div>
     ${list.length ? list.map(c=>{
       const o = occOf(c);
       const nonres = o!=null && o<=20;
@@ -2217,6 +2314,19 @@ function renderCafeList(v){
     }).join('') : '<div class="empty"><p>이 조건에 맞는 매장이 없어요.</p></div>'}`;
 }
 function setSvFilter(f){ svFilter=f; renderSurvey(); }
+let svMapOpen = false;
+function toggleSvMap(){ svMapOpen = !svMapOpen; renderSurvey(); }
+function drawSurveyMap(){
+  if(!svMapOpen || !svRegionId) return;
+  const list = cafes.filter(c=>c.regionId===svRegionId && c.lat && c.lng);
+  const pins = list.map(c=>{
+    const o = occOf(c);
+    return { lat:c.lat, lng:c.lng, label:`${c.name}${o!=null?` ${o}%`:''}`,
+             color: o==null?'#8A8F98': o>=60?'#0E7A5F': o<=20?'#B07C10':'#4A5568',
+             sub:`${c.name} · ${c.brand||''} · 사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}` };
+  });
+  renderMap('svMap', pins);
+}
 function openRegion(id){ svRegionId=id; svFilter='all'; renderSurvey(); window.scrollTo(0,0); }
 function closeRegion(){ svRegionId=null; renderSurvey(); }
 
@@ -2243,6 +2353,7 @@ function cafeFormHTML(c){
       <div class="field"><label>키오스크 벤더</label><select id="cf_vendor" class="inline-input">${VENDORS.map(x=>`<option ${c?.vendor===x?'selected':''}>${x}</option>`).join('')}</select></div>
       <div class="field"><label>&nbsp;</label><label style="display:flex;gap:14px;align-items:center;font-weight:500;"><span><input type="checkbox" id="cf_target" ${c?.target?'checked':''}> 전환 타깃</span></label></div>
     </div>
+    <div class="field" style="margin-top:8px;"><label>주소 (입력 시 지도에 표시)</label><input id="cf_addr" class="inline-input" value="${esc(c?.addr||'')}" placeholder="예: 서울 강북구 미아동 …"></div>
     <div class="field" style="margin-top:8px;"><label>메모</label><input id="cf_memo" class="inline-input" value="${esc(c?.memo||'')}"></div>
   </div>`;
 }
@@ -2263,10 +2374,19 @@ async function saveCafe(){
   const lu = g('cf_lu').replace(/[^0-9]/g,''), lt = g('cf_lt').replace(/[^0-9]/g,'');
   const prev = cafeEditId ? cafes.find(c=>c.id===cafeEditId) : null;
   const id = cafeEditId || ('c' + Date.now());
+  const addr = g('cf_addr').trim();
   const lockerChanged = prev ? (prev.lockerUsed!=lu || prev.lockerTotal!=lt) : (lu!==''||lt!=='');
+  // 주소가 새로 입력·변경되면 좌표 자동 변환
+  let lat = prev?.lat ?? null, lng = prev?.lng ?? null;
+  if(addr && (!prev || prev.addr !== addr || !prev.lat)){
+    const geo = await geocode(addr);
+    if(geo){ lat = geo.lat; lng = geo.lng; }
+  }
+  if(!addr){ lat = null; lng = null; }
   const doc = {
     id, regionId: svRegionId,
-    name, dong: g('cf_dong').trim(), brand: g('cf_brand').trim(), addr: prev?.addr||'',
+    name, dong: g('cf_dong').trim(), brand: g('cf_brand').trim(), addr,
+    lat, lng,
     lockerUsed: lu, lockerTotal: lt, vendor: g('cf_vendor'),
     target: document.getElementById('cf_target').checked,
     nonres: prev?.nonres||false,
