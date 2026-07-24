@@ -17,7 +17,29 @@
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   body{background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans KR',system-ui,sans-serif;font-size:15px;line-height:1.55;}
+  .tabbar{position:sticky;top:0;z-index:40;background:var(--card);border-bottom:1px solid var(--line);}
+  .tabbar-inner{max-width:940px;margin:0 auto;padding:8px 16px;display:flex;align-items:center;gap:16px;}
+  .app-brand{font-size:17px;font-weight:700;color:var(--teal);letter-spacing:-0.01em;}
+  .tabs{display:flex;gap:4px;}
+  .tab{border:none;background:transparent;font-family:inherit;font-size:14.5px;font-weight:600;color:var(--sub);padding:9px 16px;border-radius:9px;cursor:pointer;-webkit-tap-highlight-color:transparent;min-height:40px;}
+  .tab.active{background:var(--teal-soft);color:var(--teal);}
   .wrap{max-width:940px;margin:0 auto;padding:20px 16px 90px;}
+  /* 조사 화면 */
+  .region-card,.cafe-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin-bottom:10px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+  .region-card{display:flex;justify-content:space-between;align-items:center;}
+  .region-card .rname{font-size:16px;font-weight:700;}
+  .region-card .rcount{font-size:13px;color:var(--sub);}
+  .cafe-card{cursor:default;}
+  .cafe-card .cname{font-size:15px;font-weight:700;}
+  .cafe-card .cmeta{font-size:12.5px;color:var(--sub);margin-top:2px;}
+  .occ-pill{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;}
+  .occ-bar{display:inline-block;width:64px;height:8px;border-radius:5px;background:var(--bg);overflow:hidden;vertical-align:middle;}
+  .occ-bar i{display:block;height:100%;}
+  .crumb{font-size:13px;color:var(--sub);margin-bottom:12px;}
+  .crumb a{color:var(--teal);cursor:pointer;font-weight:600;}
+  .tag-target{background:var(--amber-bg);color:var(--amber);font-size:11.5px;font-weight:700;border-radius:6px;padding:2px 7px;}
+  .tag-nonres{background:var(--indigo-soft);color:var(--indigo);font-size:11.5px;font-weight:700;border-radius:6px;padding:2px 7px;}
+  .tag-vendor{background:var(--bg);color:var(--sub);font-size:11.5px;font-weight:700;border-radius:6px;padding:2px 7px;}
   header{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-bottom:18px;flex-wrap:wrap;}
   h1{font-size:20px;font-weight:700;letter-spacing:-0.02em;}
   h1 .sub{display:block;font-size:12px;font-weight:500;color:var(--sub);letter-spacing:0;}
@@ -211,7 +233,20 @@
 </style>
 </head>
 <body>
+<div class="tabbar" id="tabbar" style="display:none;">
+  <div class="tabbar-inner">
+    <div class="app-brand">명당</div>
+    <div class="tabs">
+      <button class="tab" id="tab-survey" onclick="switchTab('survey')">🔍 조사</button>
+      <button class="tab active" id="tab-site" onclick="switchTab('site')">📍 후보지</button>
+    </div>
+  </div>
+</div>
+
 <div class="wrap">
+
+  <!-- ===== 조사 뷰 ===== -->
+  <div id="surveyView" style="display:none;"></div>
 
   <!-- ===== 목록 뷰 ===== -->
   <div id="listView">
@@ -370,6 +405,17 @@
     <p id="gateMsg" style="font-size:13.5px;color:var(--sub);margin-bottom:18px;line-height:1.6;">팀 데이터에 접근하려면 회사 계정으로 로그인하세요.</p>
     <button class="btn btn-primary" style="width:100%;padding:13px;" onclick="doLogin()">Google 계정으로 로그인</button>
     <button id="gateLogout" class="btn btn-ghost btn-sm" style="display:none;margin-top:10px;" onclick="doLogout()">다른 계정으로 로그인</button>
+  </div>
+</div>
+<div class="lightbox" id="cafeModal" style="display:none;">
+  <div class="card" style="max-width:440px;width:100%;max-height:88vh;overflow:auto;" onclick="event.stopPropagation()">
+    <div class="cm-title" style="font-size:16px;font-weight:700;margin-bottom:12px;"></div>
+    <div class="cm-body"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn btn-danger btn-sm cm-del" onclick="deleteCafe()">삭제</button>
+      <button class="btn btn-ghost btn-sm" style="margin-left:auto;" onclick="closeCafeModal()">취소</button>
+      <button class="btn btn-primary btn-sm" onclick="saveCafe()">저장</button>
+    </div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -1343,31 +1389,15 @@ let svOpen = null;       // 불러오기 패널이 열린 후보지 id
 let svQuery = '';        // 검색어
 
 async function loadSurveyData(){
-  if(surveyData) return surveyData;
-  const out = [];
-  for(const r of SURVEY_REGIONS){
-    // 같은 도메인이라 조사 툴의 localStorage를 직접 읽을 수 있음
-    let state = {};
-    try{ const v = localStorage.getItem(r.key); state = v ? JSON.parse(v) : {}; }catch(e){}
-    let venues = [];
-    try{
-      const html = await (await fetch(SURVEY_BASE + r.path + 'index.html')).text();
-      const mm = html.match(/const VENUES\s*=\s*\[([\s\S]*?)\n\];/);
-      if(mm) venues = new Function('return [' + mm[1] + ']')();
-    }catch(e){ console.error('조사 툴 목록 로드 실패', r.name, e); }
-    venues.forEach(v=>{
-      if(v.closed) return;
-      const st = state[v.id] || {};
-      const t = parseInt(st.lockerTotal,10), u = parseInt(st.lockerUsed,10);
-      const valid = (t>0 && !isNaN(u) && u>=0);
-      const occ = valid ? Math.min(100, Math.round(u/t*100)) : null;
-      out.push({ region:r.name, name:v.name, area:v.area||'', district:v.district||'', brand:v.brand||'',
-                 occ, used: valid ? u : null, total: valid ? t : null,
-                 date:st.lockerDate||'', smemo:st.memo||'', target:!!st.target });
-    });
-  }
-  surveyData = out;
-  return out;
+  // 통합 후: 클라우드 cafes(조사 탭 데이터)를 그대로 사용
+  const regionName = {}; regions.forEach(r=> regionName[r.id]=r.name);
+  return cafes.map(c=>{
+    const t = parseInt(c.lockerTotal,10), u = parseInt(c.lockerUsed,10);
+    const valid = (t>0 && !isNaN(u) && u>=0);
+    return { region: regionName[c.regionId]||'', name:c.name, area:c.dong||'', district:'', brand:c.brand||'',
+             occ: valid?Math.min(100,Math.round(u/t*100)):null, used:valid?u:null, total:valid?t:null,
+             date:c.lockerDate||'', smemo:c.memo||'', target:!!c.target, vendor:c.vendor||'' };
+  });
 }
 function addrKeyword(addr){
   // 주소에서 동(洞) → 없으면 구(區) 추출: "수지구 풍덕천동 712-1" → "풍덕천동", "상현1동" → "상현동"
@@ -1380,27 +1410,27 @@ function addrKeyword(addr){
 }
 async function openSurveyImport(siteId){
   if(IS_CLAUDE){
-    notify('조사 툴 연동은 깃허브(gozipnam.github.io) 버전에서 열었을 때 동작해요.');
+    notify('조사 데이터 연동은 로그인된 깃허브 버전에서 동작해요.');
     return;
   }
   if(svOpen === siteId){ svOpen = null; render(); return; }
   const s = sites.find(x=>x.id===siteId);
   svOpen = siteId;
   svQuery = addrKeyword(s?.addr); // 주소 기준 동네 자동 필터
+  surveyData = await loadSurveyData();
   render();
-  await loadSurveyData();
   renderSurveyList(siteId);
 }
 function renderSurveyList(siteId){
   const box = document.getElementById('sv_list_' + siteId);
   if(!box) return;
-  if(!surveyData){ box.textContent = '불러오는 중…'; return; }
+  surveyData = surveyData || [];
   if(!surveyData.length){
-    box.innerHTML = '조사 툴 매장 목록을 불러오지 못했어요. 이 툴이 gozipnam.github.io 에 올라가 있는지, 조사 툴에서 점유율을 기록한 같은 기기·브라우저인지 확인해 주세요.';
+    box.innerHTML = '조사 탭에 등록된 매장이 없어요. 🔍 조사 탭에서 지역·매장을 먼저 등록해 주세요.';
     return;
   }
   const q = svQuery.trim().toLowerCase();
-  const filterFn = qq => surveyData.filter(v => !qq || (v.name + v.area + v.district + v.brand + v.region).toLowerCase().includes(qq));
+  const filterFn = qq => surveyData.filter(v => !qq || (v.name + v.area + v.district + v.brand + v.region).toLowerCase().includes(qq.replace(/\s+/g,'')) || (v.name + v.area + v.brand).toLowerCase().includes(qq));
   let list = filterFn(q);
   // "상현1동"처럼 행정동 숫자가 붙은 경우 "상현동"으로 재시도
   if(!list.length && /\d+동$/.test(q)) list = filterFn(q.replace(/\d+동$/,'동'));
@@ -1506,11 +1536,18 @@ function onAuthChanged(user){
   if(unsubSites){ unsubSites(); unsubSites = null; }
   if(!user){
     sites = []; lastSynced = {};
+    if(unsubRegions){ unsubRegions(); unsubRegions = null; }
+    if(unsubCafes){ unsubCafes(); unsubCafes = null; }
+    regions = []; cafes = [];
+    document.getElementById('tabbar').style.display = 'none';
     showLoginGate(true, false);
     render();
     return;
   }
   document.getElementById('gateMsg').textContent = '데이터를 불러오는 중…';
+  document.getElementById('tabbar').style.display = 'block';
+  subscribeSurvey(); // 조사 데이터(regions/cafes) 구독
+  try{ const last = localStorage.getItem('sc-lasttab'); if(last==='survey') switchTab('survey'); }catch(e){}
   unsubSites = db.collection('sites').onSnapshot(snap => {
     const arr = [];
     snap.forEach(d => arr.push(d.data()));
@@ -1950,6 +1987,239 @@ async function saveSite(){
   await persist();
   closeForm();
   render();
+}
+
+/* ============================================================
+   조사 메뉴 (regions / cafes) — Firestore 실시간
+   ============================================================ */
+const VENDORS = ['미확인','SSAMCAFE','스터디모아','스터디큐브','와우플','제로아이즈','픽코','기타'];
+let regions = [], cafes = [];
+let unsubRegions = null, unsubCafes = null;
+let curTab = 'site';
+let svRegionId = null;   // 열람 중인 지역
+let svFilter = 'all';    // all | target | nonres | todo
+let cafeEditId = null;
+
+function occOf(c){
+  const t = parseInt(c.lockerTotal,10), u = parseInt(c.lockerUsed,10);
+  return (t>0 && !isNaN(u) && u>=0) ? Math.min(100, Math.round(u/t*100)) : null;
+}
+function occColor(o){ return o==null?'var(--sub)': o>=60?'var(--green)': o>=30?'var(--amber)':'var(--red)'; }
+
+function switchTab(tab){
+  curTab = tab;
+  document.getElementById('tab-survey').classList.toggle('active', tab==='survey');
+  document.getElementById('tab-site').classList.toggle('active', tab==='site');
+  // 후보지 하위 화면 닫기
+  document.getElementById('formView').style.display='none';
+  document.getElementById('reportView').style.display='none';
+  document.getElementById('compareView').style.display='none';
+  document.getElementById('listView').style.display = tab==='site' ? 'block' : 'none';
+  document.getElementById('surveyView').style.display = tab==='survey' ? 'block' : 'none';
+  try{ localStorage.setItem('sc-lasttab', tab); }catch(e){}
+  if(tab==='survey') renderSurvey(); else render();
+}
+
+function subscribeSurvey(){
+  if(unsubRegions || unsubCafes) return;
+  unsubRegions = db.collection('regions').onSnapshot(snap=>{
+    const arr = []; snap.forEach(d=>arr.push(d.data()));
+    arr.sort((a,b)=>(a.order||0)-(b.order||0) || (a.name>b.name?1:-1));
+    regions = arr;
+    if(curTab==='survey') renderSurvey();
+    maybeMigrateSurvey();
+  }, e=>console.error('regions', e));
+  unsubCafes = db.collection('cafes').onSnapshot(snap=>{
+    const arr = []; snap.forEach(d=>arr.push(d.data()));
+    cafes = arr;
+    if(curTab==='survey') renderSurvey();
+  }, e=>console.error('cafes', e));
+}
+
+/* ---- 기존 조사 툴(용인·성남) 데이터 1회 이관 ---- */
+const SURVEY_MIGRATE = [
+  { rid:'gyeonggi-yongin',   name:'경기 용인시', path:'yongin/',   key:'yongin-studycafe-checklist-v1',   order:10 },
+  { rid:'gyeonggi-seongnam', name:'경기 성남시', path:'seongnam/', key:'seongnam-studycafe-checklist-v1', order:11 }
+];
+async function maybeMigrateSurvey(){
+  if(window._svMigrated) return;
+  window._svMigrated = true;
+  if(cafes.length > 0 || localStorage.getItem('sc-survey-migrated-v1')) return;
+  try{
+    let moved = 0;
+    for(const r of SURVEY_MIGRATE){
+      let state = {};
+      try{ const v = localStorage.getItem(r.key); state = v ? JSON.parse(v) : {}; }catch(e){}
+      let venues = [];
+      try{
+        const html = await (await fetch(SURVEY_BASE + r.path + 'index.html')).text();
+        const mm = html.match(/const VENUES\s*=\s*\[([\s\S]*?)\n\];/);
+        if(mm) venues = new Function('return [' + mm[1] + ']')();
+      }catch(e){ continue; }
+      const batch = db.batch();
+      batch.set(db.collection('regions').doc(r.rid), { id:r.rid, name:r.name, order:r.order });
+      venues.forEach(v=>{
+        if(v.closed) return;
+        const st = state[v.id] || {};
+        batch.set(db.collection('cafes').doc(r.rid + '__' + v.id), {
+          id: r.rid + '__' + v.id, regionId: r.rid,
+          name: v.name||'', dong: v.area||'', brand: v.brand||'', addr:'',
+          lockerUsed: st.lockerUsed||'', lockerTotal: st.lockerTotal||'',
+          vendor: st.vendor||'미확인', target: !!st.target, nonres: !!st.nonres,
+          lockerDate: st.lockerDate||'', memo: st.memo||v.note||'',
+          updatedBy: (fbUser&&fbUser.email)||'', updatedAt: Date.now()
+        });
+        moved++;
+      });
+      await batch.commit();
+    }
+    localStorage.setItem('sc-survey-migrated-v1','1');
+    if(moved) notify(`기존 조사 매장 ${moved}곳을 클라우드로 옮겼어요.`);
+  }catch(e){ console.error('조사 이관 실패', e); }
+}
+
+/* ---- 렌더 ---- */
+function renderSurvey(){
+  const v = document.getElementById('surveyView');
+  if(svRegionId) renderCafeList(v);
+  else renderRegionList(v);
+}
+function renderRegionList(v){
+  const counts = {};
+  cafes.forEach(c=> counts[c.regionId] = (counts[c.regionId]||0)+1 );
+  const occAvg = {};
+  regions.forEach(r=>{
+    const list = cafes.filter(c=>c.regionId===r.id).map(occOf).filter(x=>x!=null);
+    occAvg[r.id] = list.length ? Math.round(list.reduce((a,b)=>a+b,0)/list.length) : null;
+  });
+  v.innerHTML = `
+    <header>
+      <h1>스터디카페 조사<span class="sub">지역별 사물함 점유율 · 경쟁 벤더 · 전환 타깃 조사</span></h1>
+      <button class="btn btn-primary" onclick="addRegion()">+ 지역 추가</button>
+    </header>
+    ${regions.length ? regions.map(r=>`
+      <div class="region-card" onclick="openRegion('${r.id}')">
+        <div>
+          <div class="rname">${esc(r.name)}</div>
+          <div class="rcount">매장 ${counts[r.id]||0}곳${occAvg[r.id]!=null?` · 평균 점유율 ${occAvg[r.id]}%`:''}</div>
+        </div>
+        <span style="color:var(--sub);">›</span>
+      </div>`).join('') : '<div class="empty"><div class="big">🔍</div><p>아직 등록된 지역이 없어요.<br>"지역 추가"로 조사할 지역을 만들어 보세요.</p></div>'}`;
+}
+function renderCafeList(v){
+  const r = regions.find(x=>x.id===svRegionId);
+  if(!r){ svRegionId=null; renderSurvey(); return; }
+  let list = cafes.filter(c=>c.regionId===svRegionId);
+  if(svFilter==='target') list = list.filter(c=>c.target);
+  else if(svFilter==='nonres') list = list.filter(c=>{ const o=occOf(c); return o!=null && o<=20; });
+  else if(svFilter==='todo') list = list.filter(c=>occOf(c)==null);
+  list.sort((a,b)=> (occOf(b) ?? -1) - (occOf(a) ?? -1)); // 점유율 높은 순
+
+  v.innerHTML = `
+    <div class="crumb"><a onclick="closeRegion()">← 지역 목록</a></div>
+    <header>
+      <h1>${esc(r.name)}<span class="sub">점유율 높은 순 · 미조사는 아래로</span></h1>
+      <button class="btn btn-primary" onclick="addCafe()">+ 매장 추가</button>
+    </header>
+    <div class="toolbar">
+      <button class="chip ${svFilter==='all'?'active':''}" onclick="setSvFilter('all')">전체</button>
+      <button class="chip ${svFilter==='target'?'active':''}" onclick="setSvFilter('target')">⭐ 전환 타깃</button>
+      <button class="chip ${svFilter==='nonres'?'active':''}" onclick="setSvFilter('nonres')">비상주 추천</button>
+      <button class="chip ${svFilter==='todo'?'active':''}" onclick="setSvFilter('todo')">미조사</button>
+    </div>
+    ${list.length ? list.map(c=>{
+      const o = occOf(c);
+      const nonres = o!=null && o<=20;
+      return `<div class="cafe-card">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+          <div style="min-width:0;">
+            <div class="cname">${esc(c.name)}</div>
+            <div class="cmeta">${esc(c.dong||'')}${c.brand?` · ${esc(c.brand)}`:''}${c.lockerDate?` · 조사 ${esc(c.lockerDate)}`:''}</div>
+          </div>
+          <div class="occ-pill" style="color:${occColor(o)}">
+            ${o!=null?`<span class="occ-bar"><i style="width:${o}%;background:${occColor(o)}"></i></span>${o}%`:'미조사'}
+          </div>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          ${c.lockerUsed!==''&&c.lockerTotal!==''?`<span class="tag-vendor">사물함 ${esc(c.lockerUsed)}/${esc(c.lockerTotal)}</span>`:''}
+          <span class="tag-vendor">${esc(c.vendor||'미확인')}</span>
+          ${c.target?'<span class="tag-target">⭐ 고스카 전환 타깃</span>':''}
+          ${nonres?'<span class="tag-nonres">비상주 추천</span>':''}
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto;" onclick="editCafe('${c.id}')">수정</button>
+        </div>
+      </div>`;
+    }).join('') : '<div class="empty"><p>이 조건에 맞는 매장이 없어요.</p></div>'}`;
+}
+function setSvFilter(f){ svFilter=f; renderSurvey(); }
+function openRegion(id){ svRegionId=id; svFilter='all'; renderSurvey(); window.scrollTo(0,0); }
+function closeRegion(){ svRegionId=null; renderSurvey(); }
+
+/* ---- 지역 CRUD ---- */
+async function addRegion(){
+  const name = prompt('지역 이름을 입력하세요 (예: 서울 강남구)');
+  if(!name || !name.trim()) return;
+  const id = 'r' + Date.now();
+  try{
+    await db.collection('regions').doc(id).set({ id, name:name.trim(), order: (regions.length+1)*10 });
+    notify('지역을 추가했어요.');
+  }catch(e){ notify('지역 추가 실패: ' + (e.message||'')); }
+}
+
+/* ---- 매장 CRUD (prompt 기반 간단 입력 폼) ---- */
+function cafeFormHTML(c){
+  return `<div style="text-align:left;">
+    <div class="field"><label>매장명 *</label><input id="cf_name" class="inline-input" value="${esc(c?.name||'')}"></div>
+    <div class="grid2" style="margin-top:8px;">
+      <div class="field"><label>동/지역</label><input id="cf_dong" class="inline-input" value="${esc(c?.dong||'')}" placeholder="예: 죽전동"></div>
+      <div class="field"><label>브랜드</label><input id="cf_brand" class="inline-input" value="${esc(c?.brand||'')}" placeholder="예: 멘토즈"></div>
+      <div class="field"><label>사물함 이용 수</label><input id="cf_lu" class="inline-input" type="number" value="${esc(c?.lockerUsed??'')}"></div>
+      <div class="field"><label>사물함 총 개수</label><input id="cf_lt" class="inline-input" type="number" value="${esc(c?.lockerTotal??'')}"></div>
+      <div class="field"><label>키오스크 벤더</label><select id="cf_vendor" class="inline-input">${VENDORS.map(x=>`<option ${c?.vendor===x?'selected':''}>${x}</option>`).join('')}</select></div>
+      <div class="field"><label>&nbsp;</label><label style="display:flex;gap:14px;align-items:center;font-weight:500;"><span><input type="checkbox" id="cf_target" ${c?.target?'checked':''}> 전환 타깃</span></label></div>
+    </div>
+    <div class="field" style="margin-top:8px;"><label>메모</label><input id="cf_memo" class="inline-input" value="${esc(c?.memo||'')}"></div>
+  </div>`;
+}
+function addCafe(){ cafeEditId=null; openCafeModal(null); }
+function editCafe(id){ cafeEditId=id; openCafeModal(cafes.find(c=>c.id===id)); }
+function openCafeModal(c){
+  const wrap = document.getElementById('cafeModal');
+  wrap.querySelector('.cm-title').textContent = c ? '매장 수정' : '매장 추가';
+  wrap.querySelector('.cm-body').innerHTML = cafeFormHTML(c);
+  wrap.querySelector('.cm-del').style.display = c ? 'inline-block' : 'none';
+  wrap.style.display = 'flex';
+}
+function closeCafeModal(){ document.getElementById('cafeModal').style.display='none'; cafeEditId=null; }
+async function saveCafe(){
+  const g = id => { const el=document.getElementById(id); return el?el.value:''; };
+  const name = g('cf_name').trim();
+  if(!name){ notify('매장명을 입력해 주세요.'); return; }
+  const lu = g('cf_lu').replace(/[^0-9]/g,''), lt = g('cf_lt').replace(/[^0-9]/g,'');
+  const prev = cafeEditId ? cafes.find(c=>c.id===cafeEditId) : null;
+  const id = cafeEditId || ('c' + Date.now());
+  const lockerChanged = prev ? (prev.lockerUsed!=lu || prev.lockerTotal!=lt) : (lu!==''||lt!=='');
+  const doc = {
+    id, regionId: svRegionId,
+    name, dong: g('cf_dong').trim(), brand: g('cf_brand').trim(), addr: prev?.addr||'',
+    lockerUsed: lu, lockerTotal: lt, vendor: g('cf_vendor'),
+    target: document.getElementById('cf_target').checked,
+    nonres: prev?.nonres||false,
+    lockerDate: lockerChanged ? new Date().toISOString().slice(0,10) : (prev?.lockerDate||''),
+    memo: g('cf_memo').trim(),
+    updatedBy: (fbUser&&fbUser.email)||'', updatedAt: Date.now()
+  };
+  try{
+    await db.collection('cafes').doc(id).set(doc);
+    closeCafeModal();
+    notify(cafeEditId?'매장 정보를 수정했어요.':'매장을 추가했어요.');
+  }catch(e){ notify('저장 실패: ' + (e.message||'')); }
+}
+let cafeDelPending = false;
+async function deleteCafe(){
+  if(!cafeEditId) return;
+  if(!cafeDelPending){ cafeDelPending = true; document.querySelector('#cafeModal .cm-del').textContent='정말 삭제?'; setTimeout(()=>{cafeDelPending=false; const b=document.querySelector('#cafeModal .cm-del'); if(b)b.textContent='삭제';},4000); return; }
+  try{ await db.collection('cafes').doc(cafeEditId).delete(); closeCafeModal(); cafeDelPending=false; notify('매장을 삭제했어요.'); }
+  catch(e){ notify('삭제 실패: ' + (e.message||'')); }
 }
 
 buildBldFields();
