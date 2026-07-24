@@ -313,6 +313,7 @@
       <div class="dc-actions">
         <button class="btn btn-primary btn-sm" onclick="exportData()">💾 백업 복사</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleRestore()">↩️ 복원</button>
+        <button class="btn btn-ghost btn-sm" onclick="applySeedCoords()">📍 서울 좌표 채우기</button>
       </div>
       <div class="addform" id="restorePanel" style="margin-top:12px;">
         <label style="display:block;font-size:11.5px;font-weight:600;color:var(--sub);margin-bottom:4px;">백업 텍스트 붙여넣기 — 적용하면 현재 목록을 백업 내용으로 교체합니다</label>
@@ -1437,6 +1438,60 @@ function renderCompare(){
 const SURVEY_BASE = 'https://gozipnam.github.io/studycafe-survey/';
 
 /* ---------- 네이버 지도 ---------- */
+const SEED_COORDS = {
+  "seoul-gangbuk__sunny-mia":[37.6102252,127.0298456],
+  "seoul-gangbuk__seldo-mia":[37.6129194,127.0341747],
+  "seoul-gangbuk__premium-mia":[37.6163756,127.0339046],
+  "seoul-gangbuk__dingle-mia":[37.6269617,127.0262757],
+  "seoul-gangbuk__synergy-mia":[37.6238059,127.0274725],
+  "seoul-gangbuk__heaven-mia":[37.6238059,127.0274725],
+  "seoul-gangbuk__winum-mia":[37.6304236,127.0241631],
+  "seoul-gangbuk__regain-suyu":[37.6350215,127.0255668],
+  "seoul-gangbuk__aimhigh-suyu":[37.6390289,127.025204],
+  "seoul-gangbuk__gongbaek-gil":[37.6044109,127.0239028],
+  "seoul-gangbuk__gileum-sc":[37.602671,127.0236243],
+  "seoul-gangbuk__max-gil":[37.6086084,127.02397],
+  "seoul-gangbuk__link-gil":[37.6087785,127.0191497],
+  "seoul-gangbuk__onthedesk-gil":[37.611863,127.017528],
+  "seoul-gangbuk__dd-samgak":[37.6197001,127.0193997],
+  "seoul-gangbuk__enarche-mia":[37.6202986,127.018925],
+  "seoul-yangcheon__growing-md":[37.5248447,126.8632183],
+  "seoul-yangcheon__leheim-md":[37.525528,126.8617363],
+  "seoul-yangcheon__gibon-md":[37.52594,126.8616484],
+  "seoul-yangcheon__mentors-md":[37.527963,126.8630864],
+  "seoul-yangcheon__guru-md":[37.5259231,126.868438],
+  "seoul-yangcheon__jaksim-mdyk":[37.5239446,126.8646079],
+  "seoul-yangcheon__thegg-omk":[37.5233643,126.8749555],
+  "seoul-yangcheon__lang-omk":[37.5224348,126.8742386],
+  "seoul-yangcheon__beable-omk":[37.537578,126.8722063],
+  "seoul-yangcheon__jaksim-m5d":[37.5363389,126.878533],
+  "seoul-yangcheon__gongbon-md":[37.5354935,126.881278],
+  "seoul-yangcheon__poten-md":[37.5380196,126.8718273],
+  "seoul-yangcheon__dajim-md":[37.5372665,126.8718683],
+  "seoul-yangcheon__beable-md":[37.537578,126.8722063],
+  "seoul-yangcheon__sizak-md1":[37.5315688,126.8759682],
+  "seoul-yangcheon__beable-smd":[37.5373376,126.8848476],
+  "seoul-yangcheon__leheim-sjn":[37.5205161,126.8530374],
+  "seoul-yangcheon__wiz-smd":[37.5491769,126.8643707]
+};
+
+
+async function applySeedCoords(){
+  if(!cafes.length){ notify("조사 매장을 먼저 불러온 뒤 실행하세요."); return; }
+  let n = 0;
+  const batch = db.batch();
+  cafes.forEach(c=>{
+    if(SEED_COORDS[c.id] && (!c.lat || !c.lng)){
+      const [lat,lng] = SEED_COORDS[c.id];
+      batch.update(db.collection("cafes").doc(c.id), { lat, lng });
+      n++;
+    }
+  });
+  if(!n){ notify("채울 좌표가 없어요 (이미 입력됐거나 대상 지역이 아직 없음)."); return; }
+  try{ await batch.commit(); notify(`좌표 ${n}곳을 채웠어요. 지도에서 확인하세요.`); }
+  catch(e){ notify("좌표 입력 실패: " + (e.message||"")); }
+}
+
 const NAVER_MAP_KEY = 'i3zfsrm5kz';
 let naverLoaded = null;
 function ensureNaverMap(){
