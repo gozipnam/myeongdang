@@ -244,6 +244,7 @@
 
     <div class="data-card">
       <div class="dc-title">🗄️ 데이터 관리</div>
+      <div id="authBar" style="display:none;font-size:12.5px;font-weight:600;color:var(--teal);margin-bottom:8px;"></div>
       <div class="dc-desc">조사 기록은 이 툴 안에만 저장됩니다. 주 1회 백업을 권장해요 — "백업 복사"를 눌러 메모장이나 카톡(나에게 보내기)에 붙여넣어 보관하고, 필요할 때 "복원"으로 되살릴 수 있습니다. (사진은 백업에서 제외)</div>
       <div class="dc-actions">
         <button class="btn btn-primary btn-sm" onclick="exportData()">💾 백업 복사</button>
@@ -362,6 +363,15 @@
 </div>
 
 <div class="lightbox" id="lightbox" onclick="this.classList.remove('open')"><img id="lightboxImg" alt="사진 확대"></div>
+<div id="loginGate" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:60;align-items:center;justify-content:center;padding:20px;">
+  <div class="card" style="max-width:360px;width:100%;text-align:center;padding:30px 24px;">
+    <div style="font-size:34px;margin-bottom:10px;">📍</div>
+    <div style="font-size:18px;font-weight:700;margin-bottom:6px;">스터디카페 후보지 분석 보드</div>
+    <p id="gateMsg" style="font-size:13.5px;color:var(--sub);margin-bottom:18px;line-height:1.6;">팀 데이터에 접근하려면 회사 계정으로 로그인하세요.</p>
+    <button class="btn btn-primary" style="width:100%;padding:13px;" onclick="doLogin()">Google 계정으로 로그인</button>
+    <button id="gateLogout" class="btn btn-ghost btn-sm" style="display:none;margin-top:10px;" onclick="doLogout()">다른 계정으로 로그인</button>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 <input type="file" id="photoInput" accept="image/*" multiple style="display:none">
 
@@ -525,19 +535,7 @@ async function load(){
     sites = r && r.value ? JSON.parse(r.value) : [];
   }catch(e){ sites = []; }
   // 구버전 데이터 보정
-  sites.forEach(s => {
-    if(!s.bld) s.bld = {};
-    if(!s.broker) s.broker = {};
-    if(!s.competitors) s.competitors = [];
-    if(!s.interviews) s.interviews = [];
-    if(!s.checks) s.checks = [];
-    // 체크리스트 순서 변경(중요도순) 이관 — 구버전 20개 배열만 대상
-    if(s.clv !== 2){
-      if(s.checks.length === 20) s.checks = CHECK_MIGRATE.map(oldIdx => !!s.checks[oldIdx]);
-      s.clv = 2;
-    }
-    while(s.checks.length < CHECKLIST.length) s.checks.push(false);
-  });
+  normalizeSites();
   render();
 }
 let persistChain = Promise.resolve(); // 저장 요청이 겹치지 않게 순서대로 처리
@@ -546,6 +544,34 @@ function persist(){
   return persistChain;
 }
 async function doPersist(){
+  // 클라우드 모드: 바뀐 후보지만 Firestore에 업로드 (삭제 포함)
+  if(cloudMode && fbUser && db){
+    try{
+      const batch = db.batch();
+      let n = 0;
+      const ids = new Set();
+      sites.forEach(s=>{
+        ids.add(s.id);
+        const j = JSON.stringify(s);
+        if(lastSynced[s.id] !== j){
+          batch.set(db.collection('sites').doc(s.id), JSON.parse(j));
+          lastSynced[s.id] = j; n++;
+        }
+      });
+      Object.keys(lastSynced).forEach(id=>{
+        if(!ids.has(id)){
+          batch.delete(db.collection('sites').doc(id));
+          delete lastSynced[id]; n++;
+        }
+      });
+      if(n) await batch.commit();
+      return;
+    }catch(e){
+      console.error('클라우드 저장 실패', e);
+      notify('클라우드 저장 실패 — 네트워크 확인 후 항목을 다시 수정하면 재시도돼요.');
+      return;
+    }
+  }
   for(let attempt = 0; attempt < 4; attempt++){
     try{
       await store.set(STORAGE_KEY, JSON.stringify(sites));
@@ -1212,15 +1238,8 @@ async function applyRestore(){
     const arr = Array.isArray(parsed) ? parsed : parsed.sites;
     if(!Array.isArray(arr)) throw new Error('형식 오류');
     sites = arr;
-    sites.forEach(s => {
-      if(!s.id) s.id = 's' + Date.now() + Math.random().toString(36).slice(2,6);
-      if(!s.bld) s.bld = {};
-      if(!s.broker) s.broker = {};
-      if(!s.competitors) s.competitors = [];
-      if(!s.interviews) s.interviews = [];
-      if(!s.checks) s.checks = [];
-      while(s.checks.length < CHECKLIST.length) s.checks.push(false);
-    });
+    sites.forEach(s => { if(!s.id) s.id = 's' + Date.now() + Math.random().toString(36).slice(2,6); });
+    normalizeSites();
     await persist();
     document.getElementById('restoreText').value = '';
     document.getElementById('restorePanel').classList.remove('open');
@@ -1416,6 +1435,133 @@ async function importSurveyCafe(siteId, idx){
   render();
   notify(`${v.name} 추가 완료${v.occ!=null?` — 사물함 ${v.occ}%`:''}`);
 }
+
+/* ---------- Firebase 팀 동기화 (브라우저 버전 전용) ---------- */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyB6ITXEXNTUdcaJzuWgK4m5aI9Ia2TSEA0",
+  authDomain: "myeongdang-5bd7b.firebaseapp.com",
+  projectId: "myeongdang-5bd7b",
+  storageBucket: "myeongdang-5bd7b.firebasestorage.app",
+  messagingSenderId: "763523008528",
+  appId: "1:763523008528:web:aa9ccfbfb1683eaea02295"
+};
+let db = null, fbUser = null, cloudMode = false;
+let lastSynced = {};        // siteId → 마지막 동기화된 JSON (변경분만 업로드)
+let unsubSites = null;
+let migrationTried = false;
+
+function normalizeSites(){
+  sites.forEach(s => {
+    if(!s.bld) s.bld = {};
+    if(!s.broker) s.broker = {};
+    if(!s.competitors) s.competitors = [];
+    if(!s.interviews) s.interviews = [];
+    if(!s.checks) s.checks = [];
+    if(s.clv !== 2){
+      if(s.checks.length === 20) s.checks = CHECK_MIGRATE.map(oldIdx => !!s.checks[oldIdx]);
+      s.clv = 2;
+    }
+    while(s.checks.length < CHECKLIST.length) s.checks.push(false);
+  });
+}
+function showLoginGate(show, withLogout){
+  const g = document.getElementById('loginGate');
+  g.style.display = show ? 'flex' : 'none';
+  document.getElementById('gateLogout').style.display = withLogout ? 'inline-block' : 'none';
+}
+function updateAuthUI(){
+  const bar = document.getElementById('authBar');
+  if(cloudMode && fbUser){
+    bar.style.display = 'block';
+    bar.innerHTML = `☁️ ${esc(fbUser.email||'')} 계정으로 팀 동기화 중 <button class="del" style="border:none;background:none;color:var(--sub);cursor:pointer;font-size:12px;margin-left:8px;" onclick="doLogout()">로그아웃</button>`;
+  }else{
+    bar.style.display = 'none';
+  }
+}
+async function initFirebase(){
+  try{
+    const V = '10.12.2';
+    await loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-app-compat.js`);
+    await Promise.all([
+      loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-auth-compat.js`),
+      loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore-compat.js`)
+    ]);
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+    try{ await db.enablePersistence({ synchronizeTabs:true }); }catch(e){ /* 다중 탭 등 — 무시 */ }
+    cloudMode = true;
+    showLoginGate(true, false);
+    firebase.auth().getRedirectResult().catch(()=>{});
+    firebase.auth().onAuthStateChanged(onAuthChanged);
+  }catch(e){
+    console.error('Firebase 초기화 실패 — 기기 저장 모드로 동작', e);
+    cloudMode = false;
+    showLoginGate(false, false);
+    load(); // localStorage 모드 폴백
+  }
+}
+function onAuthChanged(user){
+  fbUser = user;
+  updateAuthUI();
+  if(unsubSites){ unsubSites(); unsubSites = null; }
+  if(!user){
+    sites = []; lastSynced = {};
+    showLoginGate(true, false);
+    render();
+    return;
+  }
+  document.getElementById('gateMsg').textContent = '데이터를 불러오는 중…';
+  unsubSites = db.collection('sites').onSnapshot(snap => {
+    const arr = [];
+    snap.forEach(d => arr.push(d.data()));
+    arr.sort((a,b)=>(a.created||0)-(b.created||0));
+    sites = arr;
+    lastSynced = {};
+    sites.forEach(s => lastSynced[s.id] = JSON.stringify(s));
+    normalizeSites();
+    showLoginGate(false, false);
+    maybeMigrateLocal(snap.size);
+    render();
+  }, err => {
+    console.error(err);
+    if(err.code === 'permission-denied'){
+      document.getElementById('gateMsg').innerHTML = `<b style="color:var(--red);">접근 권한이 없어요.</b><br>${esc(user.email||'')} 계정이 Firestore 규칙의 허용 목록에 있는지 확인해 주세요.`;
+      showLoginGate(true, true);
+    }else{
+      notify('동기화 오류: ' + (err.message||''));
+    }
+  });
+}
+async function maybeMigrateLocal(cloudCount){
+  // 클라우드가 비어 있으면 이 기기의 기존 데이터를 1회 이관
+  if(migrationTried) return;
+  migrationTried = true;
+  if(cloudCount > 0 || localStorage.getItem('sc-migrated-v1')) return;
+  let local = [];
+  try{ const v = localStorage.getItem('sc-' + STORAGE_KEY); local = v ? JSON.parse(v) : []; }catch(e){}
+  if(!local.length) return;
+  try{
+    const batch = db.batch();
+    local.forEach(s => batch.set(db.collection('sites').doc(s.id), JSON.parse(JSON.stringify(s))));
+    await batch.commit();
+    localStorage.setItem('sc-migrated-v1','1');
+    notify(`이 기기의 후보지 ${local.length}곳을 클라우드로 옮겼어요.`);
+  }catch(e){ console.error('이관 실패', e); }
+}
+async function doLogin(){
+  const provider = new firebase.auth.GoogleAuthProvider();
+  try{
+    await firebase.auth().signInWithPopup(provider);
+  }catch(e){
+    if(e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment'){
+      try{ await firebase.auth().signInWithRedirect(provider); }
+      catch(e2){ notify('로그인 실패: ' + (e2.message||'')); }
+    }else if(e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request'){
+      notify('로그인 실패: ' + (e.message||''));
+    }
+  }
+}
+function doLogout(){ firebase.auth().signOut(); }
 
 /* ---------- 보고서 ---------- */
 let reportSiteId = null;
@@ -1807,7 +1953,11 @@ async function saveSite(){
 }
 
 buildBldFields();
-load();
+if(IS_CLAUDE){
+  load(); // 클로드 안: 기존 저장 방식 그대로
+}else{
+  initFirebase(); // 브라우저: 로그인 → Firestore 팀 동기화 (실패 시 기기 저장 폴백)
+}
 </script>
 </body>
 </html>
