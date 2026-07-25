@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>스터디카페 후보지 분석 보드</title>
+<title>명당 · 스터디카페 상권분석</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
@@ -280,7 +280,7 @@
   <!-- ===== 목록 뷰 ===== -->
   <div id="listView">
     <header>
-      <h1>스터디카페 후보지 분석 보드<span class="sub">상권 + 건물 + 현장조사 → 종합 등급 (보증금 3,500 / 월세 200 기준)</span></h1>
+      <h1>명당<span class="sub">스터디카페 후보지 분석 — 상권 + 건물 + 현장조사 → 종합 등급 (보증금 3,500 / 월세 200 기준)</span></h1>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-ghost" onclick="openCompare()">⚖️ 비교</button>
         <button class="btn btn-primary" onclick="openForm()">+ 후보지 등록</button>
@@ -1019,9 +1019,9 @@ async function toggleSiteMap(id){
   // 주변 조사 매장(좌표 있는 것) 함께 표시
   cafes.filter(c=>c.lat && c.lng).forEach(c=>{
     const o = occOf(c);
-    pins.push({ lat:c.lat, lng:c.lng, label:`${c.name}${o!=null?` ${o}%`:''}`,
-      color: o==null?'#8A8F98': o>=60?'#0E7A5F': o<=20?'#B07C10':'#4A5568',
-      sub:`${c.name} · 사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}` });
+    pins.push({ lat:c.lat, lng:c.lng, label:`${c.name}${c.closed?' 폐업':o!=null?` ${o}%`:''}`,
+      color: cafeStatusColor(c),
+      sub:`${c.name} · ${c.closed?'폐업':`사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}`}` });
   });
   renderMap('siteMap-' + id, pins, center);
 }
@@ -1439,6 +1439,25 @@ const SURVEY_BASE = 'https://gozipnam.github.io/studycafe-survey/';
 
 /* ---------- 네이버 지도 ---------- */
 const SEED_COORDS = {
+  "gyeonggi-yongin__mentorim7-jj":[37.3314911,127.1234693],
+  "gyeonggi-yongin__studybank-jj":[37.331699,127.118355],
+  "gyeonggi-yongin__hongong-jd":[37.3271538,127.1128803],
+  "gyeonggi-yongin__richi-jj":[37.3319021,127.1224079],
+  "gyeonggi-yongin__olla-dku":[37.3240387,127.1231557],
+  "gyeonggi-yongin__lang-dku":[37.3242208,127.1249822],
+  "gyeonggi-yongin__gaon-dku":[37.3242717,127.1249569],
+  "gyeonggi-yongin__leheim-jj":[37.3319472,127.1251188],
+  "gyeonggi-yongin__ggsam-jj":[37.320749899999996,127.1129334],
+  "gyeonggi-yongin__guru-jj":[37.3261742,127.1182775],
+  "gyeonggi-yongin__gongbuin":[37.3198404,127.0976493],
+  "gyeonggi-yongin__sizak-sj":[37.3218135,127.0940941],
+  "gyeonggi-yongin__jaksim-sjgc":[37.3217798,127.0940978],
+  "gyeonggi-yongin__leheim-sh":[37.3064419,127.0853477],
+  "gyeonggi-yongin__mentors-sh":[37.3065981,127.0854036],
+  "gyeonggi-yongin__beable-sh":[37.3068977,127.084906],
+  "gyeonggi-yongin__ocean-sh":[37.3099399,127.0760617],
+  "gyeonggi-yongin__mentors-sb":[37.3109921,127.0812675],
+  "gyeonggi-yongin__miracle-sj":[37.3254357,127.0963411],
   "seoul-gangbuk__sunny-mia":[37.6102252,127.0298456],
   "seoul-gangbuk__seldo-mia":[37.6129194,127.0341747],
   "seoul-gangbuk__premium-mia":[37.6163756,127.0339046],
@@ -2168,7 +2187,7 @@ async function saveSite(){
 /* ============================================================
    조사 메뉴 (regions / cafes) — Firestore 실시간
    ============================================================ */
-const VENDORS = ['미확인','SSAMCAFE','스터디모아','스터디큐브','와우플','제로아이즈','픽코','기타'];
+const VENDORS = ['미확인','고스카','SSAMCAFE','스터디모아','스터디큐브','와우플','제로아이즈','픽코','기타'];
 let regions = [], cafes = [];
 let unsubRegions = null, unsubCafes = null;
 let curTab = 'site';
@@ -2180,7 +2199,24 @@ function occOf(c){
   const t = parseInt(c.lockerTotal,10), u = parseInt(c.lockerUsed,10);
   return (t>0 && !isNaN(u) && u>=0) ? Math.min(100, Math.round(u/t*100)) : null;
 }
-function occColor(o){ return o==null?'var(--sub)': o>=60?'var(--green)': o>=30?'var(--amber)':'var(--red)'; }
+function occColor(o){ return o==null?'var(--sub)': o>=80?'#CE4A36': o>=60?'#0E7A5F': o>=30?'#D98E23':'#B07C10'; }
+// 매장 상태 색상: 폐업=검정, 80%+=빨강, 조사완료=초록계열, 미조사=회색
+function cafeStatusColor(c){
+  if(c.closed) return '#2B2B2B';
+  const o = occOf(c);
+  if(o==null) return '#8A8F98';
+  if(o>=80) return '#CE4A36';
+  if(o>=60) return '#0E7A5F';
+  if(o<=20) return '#B07C10';
+  return '#4A5568';
+}
+// 키오스크 벤더 약칭 (앞글자)
+const VENDOR_ABBR = {'와우플':'와','SSAMCAFE':'SSAM','스터디모아':'모아','스터디큐브':'큐브','제로아이즈':'제로','픽코':'픽코','고스카':'고','기타':'기타'};
+function vendorTag(v){
+  if(!v || v==='미확인') return '';
+  const ab = VENDOR_ABBR[v] || v.slice(0,2);
+  return `${ab} : ${v}`;
+}
 
 function switchTab(tab){
   curTab = tab;
@@ -2267,7 +2303,7 @@ function renderSurvey(){
   if(svRegionId){ renderCafeList(v); drawSurveyMap(); }
   else renderRegionList(v);
 }
-const VENDOR_COLOR = {'픽코':'#C0433B','제로아이즈':'#2F6DB5','와우플':'#7A4FA3','SSAMCAFE':'#C77A1E','스터디모아':'#2E8B6F','스터디큐브':'#4A5568','기타':'#8A8F98'};
+const VENDOR_COLOR = {'고스카':'#0E6E5C','픽코':'#C0433B','제로아이즈':'#2F6DB5','와우플':'#7A4FA3','SSAMCAFE':'#C77A1E','스터디모아':'#2E8B6F','스터디큐브':'#4A5568','기타':'#8A8F98'};
 function svProvince(name){ return (name||'').split(' ')[0] || '기타'; }
 
 function renderRegionList(v){
@@ -2351,14 +2387,16 @@ function renderCafeList(v){
     <div id="svMap" style="display:${svMapOpen?'block':'none'};height:340px;border-radius:14px;overflow:hidden;border:1px solid var(--line);margin-bottom:14px;"></div>
     ${list.length ? list.map(c=>{
       const o = occOf(c);
-      const nonres = o!=null && o<=20;
+      const nonres = o!=null && o<=20 && !c.closed;
+      const statusCol = cafeStatusColor(c);
       const vendorBadge = c.vendor && c.vendor!=='미확인'
-        ? `<span class="badge2 b-vendor2" style="background:${VENDOR_COLOR[c.vendor]||'#8A8F98'}">${esc(c.vendor)}</span>` : '';
-      const occBadge = o!=null ? `<span class="badge2 ${o>=60?'b-occ-hi':o<=20?'b-occ-lo':'b-plain'}">점유율 ${o}%</span>` : '';
-      return `<div class="v-card" onclick="editCafe('${c.id}')">
-        <div class="v-name">${c.target?'<span class="star">⭐</span>':''}${esc(c.name)}</div>
+        ? `<span class="badge2 b-vendor2" style="background:${VENDOR_COLOR[c.vendor]||'#8A8F98'}">${esc(vendorTag(c.vendor))}</span>` : '';
+      const occBadge = c.closed ? '<span class="badge2" style="background:#2B2B2B;color:#fff;">폐업</span>'
+        : o!=null ? `<span class="badge2" style="background:${o>=80?'#FAE8E4':o>=60?'var(--sv-target-bg)':'var(--sv-warn-bg)'};color:${statusCol};">점유율 ${o}%${o>=80?' 🔴':''}</span>` : '';
+      return `<div class="v-card" style="border-left:4px solid ${statusCol};${c.closed?'opacity:.6;':''}" onclick="editCafe('${c.id}')">
+        <div class="v-name">${c.target?'<span class="star">⭐</span>':''}${esc(c.name)}${c.closed?' <span style="font-size:12px;color:#2B2B2B;font-weight:700;">(폐업)</span>':''}</div>
         <div class="v-sub">${esc(c.dong||'')}${c.brand?` · ${esc(c.brand)}`:''}${c.lockerDate?` · 조사 ${esc(c.lockerDate)}`:''}</div>
-        ${o!=null?`<div class="occ-row"><b style="color:${o>=60?'var(--sv-target)':o<=20?'var(--sv-warn)':'var(--ink)'}">${o}%</b><span>사물함 ${esc(c.lockerUsed)}/${esc(c.lockerTotal)}</span></div>`:''}
+        ${o!=null&&!c.closed?`<div class="occ-row"><b style="color:${statusCol}">${o}%</b><span>사물함 ${esc(c.lockerUsed)}/${esc(c.lockerTotal)}</span></div>`:''}
         <div class="v-badges">
           ${occBadge}
           ${nonres?'<span class="badge2 b-nr">🏠 비상주 추천</span>':''}
@@ -2376,9 +2414,9 @@ function drawSurveyMap(){
   const list = cafes.filter(c=>c.regionId===svRegionId && c.lat && c.lng);
   const pins = list.map(c=>{
     const o = occOf(c);
-    return { lat:c.lat, lng:c.lng, label:`${c.name}${o!=null?` ${o}%`:''}`,
-             color: o==null?'#8A8F98': o>=60?'#0E7A5F': o<=20?'#B07C10':'#4A5568',
-             sub:`${c.name} · ${c.brand||''} · 사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}` };
+    return { lat:c.lat, lng:c.lng, label:`${c.name}${c.closed?' 폐업':o!=null?` ${o}%`:''}`,
+             color: cafeStatusColor(c),
+             sub:`${c.name} · ${c.brand||''} · ${c.closed?'폐업':`사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}`}${c.vendor&&c.vendor!=='미확인'?` · ${c.vendor}`:''}` };
   });
   renderMap('svMap', pins);
 }
@@ -2406,7 +2444,7 @@ function cafeFormHTML(c){
       <div class="field"><label>사물함 이용 수</label><input id="cf_lu" class="inline-input" type="number" value="${esc(c?.lockerUsed??'')}"></div>
       <div class="field"><label>사물함 총 개수</label><input id="cf_lt" class="inline-input" type="number" value="${esc(c?.lockerTotal??'')}"></div>
       <div class="field"><label>키오스크 벤더</label><select id="cf_vendor" class="inline-input">${VENDORS.map(x=>`<option ${c?.vendor===x?'selected':''}>${x}</option>`).join('')}</select></div>
-      <div class="field"><label>&nbsp;</label><label style="display:flex;gap:14px;align-items:center;font-weight:500;"><span><input type="checkbox" id="cf_target" ${c?.target?'checked':''}> 전환 타깃</span></label></div>
+      <div class="field"><label>&nbsp;</label><label style="display:flex;gap:14px;align-items:center;font-weight:500;flex-wrap:wrap;"><span><input type="checkbox" id="cf_target" ${c?.target?'checked':''}> 전환 타깃</span><span><input type="checkbox" id="cf_closed" ${c?.closed?'checked':''}> 폐업</span></label></div>
     </div>
     <div class="field" style="margin-top:8px;"><label>주소 (입력 시 지도에 표시)</label><input id="cf_addr" class="inline-input" value="${esc(c?.addr||'')}" placeholder="예: 서울 강북구 미아동 …"></div>
     <div class="field" style="margin-top:8px;"><label>메모</label><input id="cf_memo" class="inline-input" value="${esc(c?.memo||'')}"></div>
@@ -2444,6 +2482,7 @@ async function saveCafe(){
     lat, lng,
     lockerUsed: lu, lockerTotal: lt, vendor: g('cf_vendor'),
     target: document.getElementById('cf_target').checked,
+    closed: document.getElementById('cf_closed').checked,
     nonres: prev?.nonres||false,
     lockerDate: lockerChanged ? new Date().toISOString().slice(0,10) : (prev?.lockerDate||''),
     memo: g('cf_memo').trim(),
