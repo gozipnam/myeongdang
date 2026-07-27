@@ -191,6 +191,15 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
   .field label{display:block;font-size:12px;font-weight:600;color:var(--sub);margin-bottom:4px;}
+  .cf-toggles{display:flex;gap:10px;margin-top:2px;}
+  .cf-toggles input[type=checkbox]{position:absolute;opacity:0;width:0;height:0;pointer-events:none;}
+  .cf-toggle{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;min-height:50px;border-radius:11px;border:1.5px solid var(--line);background:var(--card);color:var(--sub);font-size:14.5px;font-weight:600;cursor:pointer;transition:.15s;-webkit-tap-highlight-color:transparent;user-select:none;}
+  .cf-t::before{content:"\2606";}
+  #cf_target:checked + .cf-t{background:var(--sv-target);border-color:var(--sv-target);color:#fff;}
+  #cf_target:checked + .cf-t::before{content:"\2605";}
+  .cf-c::before{content:"\25CB";}
+  #cf_closed:checked + .cf-c{background:var(--red);border-color:var(--red);color:#fff;}
+  #cf_closed:checked + .cf-c::before{content:"\25CF";}
   .field input,.field select{width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 11px;font-family:inherit;font-size:16px;background:#fff;color:var(--ink);min-height:44px;}
   .field input:focus,.field select:focus,textarea:focus,input.inline-input:focus{outline:2px solid var(--teal);outline-offset:-1px;border-color:var(--teal);}
   .field .hint{font-size:11px;color:var(--sub);margin-top:3px;}
@@ -914,16 +923,29 @@ function detailHTML(s,c){
     <div class="sec-title">주변 스터디카페 동향 (사물함 점유율 = 잘 되는지 지표)</div>
     ${(()=>{
       const arr = (s.competitors||[]).map((cp,i)=>({cp,i}));
-      arr.sort((a,b)=> (b.cp.locker ?? -1) - (a.cp.locker ?? -1)); // 점유율 높은 순
-      return arr.map(({cp,i})=>`
+      if(!arr.length) return '<div style="font-size:13px;color:var(--sub);">아직 기록된 경쟁업체가 없어요. 사물함이 얼마나 차 있는지가 실제 매출을 가늠하는 좋은 신호입니다.</div>';
+      const withData = arr.filter(x=> x.cp.locker != null).sort((a,b)=> b.cp.locker - a.cp.locker); // 점유율 높은 순
+      const noData = arr.filter(x=> x.cp.locker == null);
+      const n = withData.length;
+      const k = Math.min(5, Math.floor(n/2));           // 데이터 10곳 미만이면 겹치지 않게 자동 축소
+      const top = withData.slice(0, k);
+      const bottom = k>0 ? withData.slice(n-k).reverse() : [];   // 낮은 순
+      const rest = withData.slice(k, n-k).concat(noData);        // 중간 구간 + 점유율 미확인 (접근 유지)
+      const row = ({cp,i}, barColor)=>`
       <div class="subcard">
         <div class="head"><span>${esc(cp.name)||'이름 없음'}</span><span><button class="del" style="color:var(--teal);margin-right:10px;" onclick="editCompetitor('${s.id}',${i})">수정</button><button class="del" onclick="delCompetitor('${s.id}',${i})">삭제</button></span></div>
         <div class="meta">
-          사물함 점유율 ${cp.locker!=null?`<span class="locker-bar"><i style="width:${Math.min(100,cp.locker)}%"></i></span><b>${cp.locker}%</b>`:'미확인'}
+          사물함 점유율 ${cp.locker!=null?`<span class="locker-bar"><i style="width:${Math.min(100,cp.locker)}%${barColor?`;background:${barColor}`:''}"></i></span><b${barColor?` style="color:${barColor}"`:''}>${cp.locker}%</b>`:'미확인'}
           · 이용 ${cp.lockerUsed!=null&&cp.lockerTotal!=null?`<b>${cp.lockerUsed}/${cp.lockerTotal}</b>개`:'—'}
         </div>
-      </div>`).join('');
-    })() || '<div style="font-size:13px;color:var(--sub);">아직 기록된 경쟁업체가 없어요. 사물함이 얼마나 차 있는지가 실제 매출을 가늠하는 좋은 신호입니다.</div>'}
+      </div>`;
+      const grp = (title,color,items,barColor)=> items.length
+        ? `<div style="font-size:12px;font-weight:700;color:${color};margin:12px 0 6px;letter-spacing:.02em;">${title}</div>`+items.map(x=>row(x,barColor)).join('')
+        : '';
+      return grp(`⭐ 주변 잘되는 곳 · 상위 ${k}곳`, 'var(--sv-target)', top, 'var(--sv-target)')
+           + grp(`⚠ 주변 안되는 곳 · 하위 ${k}곳`, 'var(--red)', bottom, 'var(--red)')
+           + grp('그 외 · 점유율 미확인', 'var(--sub)', rest, null);
+    })()}
     <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="toggleAddForm('cpForm-${s.id}')">+ 경쟁업체 기록</button>
     <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="openSurveyImport('${s.id}')">📥 조사 툴에서 불러오기</button>
     <div class="addform ${svOpen===s.id?'open':''}" id="svForm-${s.id}">
@@ -2444,7 +2466,7 @@ function cafeFormHTML(c){
       <div class="field"><label>사물함 이용 수</label><input id="cf_lu" class="inline-input" type="number" value="${esc(c?.lockerUsed??'')}"></div>
       <div class="field"><label>사물함 총 개수</label><input id="cf_lt" class="inline-input" type="number" value="${esc(c?.lockerTotal??'')}"></div>
       <div class="field"><label>키오스크 벤더</label><select id="cf_vendor" class="inline-input">${VENDORS.map(x=>`<option ${c?.vendor===x?'selected':''}>${x}</option>`).join('')}</select></div>
-      <div class="field"><label>&nbsp;</label><label style="display:flex;gap:14px;align-items:center;font-weight:500;flex-wrap:wrap;"><span><input type="checkbox" id="cf_target" ${c?.target?'checked':''}> 전환 타깃</span><span><input type="checkbox" id="cf_closed" ${c?.closed?'checked':''}> 폐업</span></label></div>
+      <div class="field" style="grid-column:1/-1;"><label>상태</label><div class="cf-toggles"><input type="checkbox" id="cf_target" ${c?.target?'checked':''}><label for="cf_target" class="cf-toggle cf-t"> 전환 타깃</label><input type="checkbox" id="cf_closed" ${c?.closed?'checked':''}><label for="cf_closed" class="cf-toggle cf-c"> 폐업</label></div></div>
     </div>
     <div class="field" style="margin-top:8px;"><label>주소 (입력 시 지도에 표시)</label><input id="cf_addr" class="inline-input" value="${esc(c?.addr||'')}" placeholder="예: 서울 강북구 미아동 …"></div>
     <div class="field" style="margin-top:8px;"><label>메모</label><input id="cf_memo" class="inline-input" value="${esc(c?.memo||'')}"></div>
