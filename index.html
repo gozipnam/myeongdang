@@ -275,7 +275,7 @@
   <div class="tabbar-inner">
     <div class="app-brand">명당</div>
     <div class="tabs">
-      <button class="tab" id="tab-survey" onclick="switchTab('survey')">🔍 조사</button>
+      <button class="tab" id="tab-survey" onclick="switchTab('survey')">🔍 점유율 조사</button>
       <button class="tab active" id="tab-site" onclick="switchTab('site')">📍 후보지</button>
     </div>
   </div>
@@ -2267,6 +2267,7 @@ function subscribeSurvey(){
     const arr = []; snap.forEach(d=>arr.push(d.data()));
     cafes = arr;
     if(curTab==='survey') renderSurvey();
+    applyBackupToFirestore();
   }, e=>console.error('cafes', e));
 }
 
@@ -2277,6 +2278,38 @@ const SURVEY_MIGRATE = [
   { rid:'seoul-gangbuk',     name:'서울 강북구',   path:'seoul/gangbuk/',  key:'gangbuk-studycafe-checklist-v1',   order:20, tag:'미아사거리' },
   { rid:'seoul-yangcheon',   name:'서울 양천구',   path:'seoul/yangcheon/',key:'yangcheon-studycafe-checklist-v1', order:21, tag:'목동역' }
 ];
+
+/* ---- 조사 백업 데이터 임베드 (2026-07-08~09 용인·성남) ---- */
+const SURVEY_BACKUP = {"gyeonggi-yongin__richi-jj":{"lockerUsed":"41","lockerTotal":"120","vendor":"와우플","lockerDate":"2026-07-08"},"gyeonggi-yongin__guru-jj":{"lockerUsed":"11","lockerTotal":"45","vendor":"와우플","target":true,"nonres":true,"lockerDate":"2026-07-08"},"gyeonggi-yongin__mentors-sjgc":{"lockerUsed":"60","lockerTotal":"72","vendor":"자체 앱(프랜차이즈)","memo":"자체 앱 : 컴앤패스","lockerDate":"2026-07-08"},"gyeonggi-yongin__bluemoon-sjgc":{"lockerUsed":"38","lockerTotal":"65","vendor":"와우플","lockerDate":"2026-07-08"},"gyeonggi-yongin__miracle-sj":{"lockerUsed":"20","lockerTotal":"75","vendor":"와우플","target":true,"nonres":true,"lockerDate":"2026-07-08"},"gyeonggi-yongin__leheim-sh":{"lockerUsed":"37","lockerTotal":"55","vendor":"자체 앱(프랜차이즈)","memo":"자체 앱 : 르하임","lockerDate":"2026-07-08"},"gyeonggi-yongin__mentors-sh":{"lockerUsed":"37","lockerTotal":"90","vendor":"자체 앱(프랜차이즈)","memo":"자체 앱 : 컴앤패스","lockerDate":"2026-07-08"},"gyeonggi-yongin__mentors-sb":{"lockerUsed":"39","lockerTotal":"54","vendor":"자체 앱(프랜차이즈)","memo":"자체 앱 : 컴앤패스","lockerDate":"2026-07-08"},"gyeonggi-yongin__guru-sb":{"lockerUsed":"19","lockerTotal":"35","vendor":"자체 앱(프랜차이즈)","memo":"그루스터디카페 수지성복센터\n자체 앱 : 그루스터디센터","lockerDate":"2026-07-09"},"gyeonggi-yongin__gongbon":{"lockerUsed":"27","lockerTotal":"30","vendor":"자체 앱(프랜차이즈)","memo":"자체 앱 : 공본","lockerDate":"2026-07-08"},"gyeonggi-yongin__plana-sb":{"lockerUsed":"38","lockerTotal":"64","vendor":"자체 앱(프랜차이즈)","memo":"자체 앱 : 플랜에이","lockerDate":"2026-07-09"},"gyeonggi-yongin__sumanhwi-sb":{"vendor":"고스카","memo":"사물함 : 없음"},"gyeonggi-yongin__timeyou-dc":{"lockerUsed":"53","lockerTotal":"96","vendor":"자체 앱(프랜차이즈)","memo":"자체 앱 : 타임유","lockerDate":"2026-07-08"},"gyeonggi-yongin__wide-dc":{"lockerUsed":"35","lockerTotal":"110","vendor":"와우플","target":true,"memo":"와이드플래닛 동천점","lockerDate":"2026-07-08"},"gyeonggi-yongin__growlab-sinb":{"vendor":"SSAMCAFE","memo":"사물함 : 키오스크에서만 구매"},"gyeonggi-yongin__ilchwi-sinb":{"vendor":"고스카","memo":"사물함 : 없음"},"gyeonggi-yongin__alltop-gh":{"lockerUsed":"47","lockerTotal":"70","vendor":"자체 앱(프랜차이즈)","memo":"자체 앱 : 올탑","lockerDate":"2026-07-09"},"gyeonggi-yongin__chosim-db":{"lockerUsed":"33","lockerTotal":"50","vendor":"와우플","memo":"초심 동백역점","lockerDate":"2026-07-09"},"gyeonggi-yongin__muhan-sc":{"lockerUsed":"18","lockerTotal":"76","vendor":"SSAMCAFE","target":true,"lockerDate":"2026-07-08"},"gyeonggi-yongin__daily-yb":{"lockerUsed":"10","lockerTotal":"47","vendor":"자체 앱(프랜차이즈)","memo":"자체 앱 : 데일리","lockerDate":"2026-07-09"},"gyeonggi-yongin__gorim1st":{"lockerUsed":"15","lockerTotal":"20","vendor":"제로아이즈","lockerDate":"2026-07-09"},"gyeonggi-yongin__plana-dj":{"lockerUsed":"43","lockerTotal":"78","vendor":"와우플","lockerDate":"2026-07-09"},"gyeonggi-seongnam__dodream-sh":{"vendor":"기타","memo":"앱 : MOMU\n사물함 : 없음"},"gyeonggi-seongnam__sigansai-sh":{"lockerUsed":"41","lockerTotal":"41","vendor":"SSAMCAFE","lockerDate":"2026-07-08"},"gyeonggi-seongnam__wpencil-sn":{"lockerUsed":"29","lockerTotal":"100","vendor":"자체 앱(프랜차이즈)","memo":"자체 앱 : WhitePencil","lockerDate":"2026-07-08"},"gyeonggi-seongnam__bluemoon-sn":{"vendor":"와우플","memo":"사물함 : 없음"},"gyeonggi-seongnam__gongbon-jj":{"lockerUsed":"30","lockerTotal":"30","vendor":"와우플","lockerDate":"2026-07-08"},"gyeonggi-seongnam__lagom-jj":{"lockerUsed":"15","lockerTotal":"55","vendor":"고스카","lockerDate":"2026-07-08"},"gyeonggi-seongnam__gongbon-im":{"lockerUsed":"30","lockerTotal":"60","vendor":"와우플","lockerDate":"2026-07-08"},"gyeonggi-seongnam__thelib-im":{"lockerUsed":"4","lockerTotal":"76","vendor":"고스카","lockerDate":"2026-07-08"},"gyeonggi-seongnam__gongbon-wpg2":{"lockerUsed":"26","lockerTotal":"37","vendor":"와우플","lockerDate":"2026-07-08"},"gyeonggi-seongnam__gongbon-mg":{"lockerUsed":"35","lockerTotal":"41","vendor":"자체 앱(프랜차이즈)","memo":"자체앱 : 공본","lockerDate":"2026-07-08"},"gyeonggi-seongnam__plana-sinheung":{"lockerUsed":"32","lockerTotal":"45","vendor":"와우플","lockerDate":"2026-07-08"},"gyeonggi-seongnam__chosim-tp":{"lockerUsed":"15","lockerTotal":"60","vendor":"와우플","lockerDate":"2026-07-08"},"gyeonggi-seongnam__plana-wr":{"lockerUsed":"46","lockerTotal":"55","vendor":"와우플","lockerDate":"2026-07-08"},"gyeonggi-seongnam__didim-dd":{"lockerUsed":"13","lockerTotal":"45","vendor":"자체 앱(프랜차이즈)","memo":"자체 앱 : 스터디카페 디딤","lockerDate":"2026-07-08"}}
+;
+async function applyBackupToFirestore(){
+  if(!db || !fbUser) return;
+  if(localStorage.getItem('_svBackupApplied')) return; // 1회만 실행
+  const existing = new Map(); cafes.forEach(c => existing.set(c.id, c));
+  let updated = 0;
+  const batch = db.batch();
+  for(const [docId, st] of Object.entries(SURVEY_BACKUP)){
+    const cur = existing.get(docId);
+    if(!cur) continue; // 매장이 Firestore에 없으면 건너뜀
+    const patch = {};
+    if(st.lockerUsed && !cur.lockerUsed) patch.lockerUsed = st.lockerUsed;
+    if(st.lockerTotal && !cur.lockerTotal) patch.lockerTotal = st.lockerTotal;
+    if(st.vendor && (cur.vendor === '미확인' || !cur.vendor)) patch.vendor = st.vendor;
+    if(st.target && !cur.target) patch.target = true;
+    if(st.nonres && !cur.nonres) patch.nonres = true;
+    if(st.memo && !cur.memo) patch.memo = st.memo;
+    if(st.lockerDate && !cur.lockerDate) patch.lockerDate = st.lockerDate;
+    if(Object.keys(patch).length === 0) continue;
+    batch.update(db.collection('cafes').doc(docId), patch);
+    updated++;
+  }
+  if(updated > 0){
+    await batch.commit();
+    notify(`백업 데이터 ${updated}건을 반영했어요.`);
+  }
+  localStorage.setItem('_svBackupApplied', Date.now());
+}
+
 async function maybeMigrateSurvey(){
   if(window._svMigrated) return;
   window._svMigrated = true;
