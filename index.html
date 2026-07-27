@@ -2236,8 +2236,7 @@ function cafeStatusColor(c){
 const VENDOR_ABBR = {'와우플':'와','SSAMCAFE':'SSAM','스터디모아':'모아','스터디큐브':'큐브','제로아이즈':'제로','픽코':'픽코','고스카':'고','기타':'기타'};
 function vendorTag(v){
   if(!v || v==='미확인') return '';
-  const ab = VENDOR_ABBR[v] || v.slice(0,2);
-  return `${ab} : ${v}`;
+  return v;
 }
 
 function switchTab(tab){
