@@ -318,12 +318,14 @@
     <div class="data-card">
       <div class="dc-title">🗄️ 데이터 관리</div>
       <div id="authBar" style="display:none;font-size:12.5px;font-weight:600;color:var(--teal);margin-bottom:8px;"></div>
-      <div class="dc-desc">조사 기록은 이 툴 안에만 저장됩니다. 주 1회 백업을 권장해요 — "백업 복사"를 눌러 메모장이나 카톡(나에게 보내기)에 붙여넣어 보관하고, 필요할 때 "복원"으로 되살릴 수 있습니다. (사진은 백업에서 제외)</div>
+      <div class="dc-desc">매주 자동 백업이 생성되며 최근 8주분이 보관됩니다. 수동 백업도 가능해요.</div>
       <div class="dc-actions">
         <button class="btn btn-primary btn-sm" onclick="exportData()">💾 백업 복사</button>
+        <button class="btn btn-ghost btn-sm" onclick="showBackupList()">📦 백업 목록</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleRestore()">↩️ 복원</button>
         <button class="btn btn-ghost btn-sm" onclick="applySeedCoords()">📍 서울 좌표 채우기</button>
       </div>
+      <div id="backupListArea" style="margin-top:12px;"></div>
       <div class="addform" id="restorePanel" style="margin-top:12px;">
         <label style="display:block;font-size:11.5px;font-weight:600;color:var(--sub);margin-bottom:4px;">백업 텍스트 붙여넣기 — 적용하면 현재 목록을 백업 내용으로 교체합니다</label>
         <textarea class="memo" id="restoreText" style="min-height:80px;font-size:12px;" placeholder='{"app":"studycafe-analyzer", ...}'></textarea>
@@ -1880,6 +1882,7 @@ function onAuthChanged(user){
     showLoginGate(false, false);
     maybeMigrateLocal(snap.size);
     render();
+    maybeAutoBackup(); // 주간 자동 백업 체크
   }, err => {
     console.error(err);
     if(err.code === 'permission-denied'){
@@ -1996,6 +1999,34 @@ function reportParts(s,c,forPdf){
       <tr><td>최근 3년 폐업</td><td class="num">${s.closed!=null?s.closed+'건':'미확인'}</td></tr>
       <tr><td>평균 운영기간</td><td class="num">${s.avgyears!=null?s.avgyears+'년':'미확인'}</td></tr>
     </table>
+
+    ${(()=>{
+      const le = s.locEval || {};
+      const hasData = Object.keys(le).length > 0;
+      if(!hasData) return '';
+      const val = (k,unit) => le[k]!=null && le[k]!=='' ? (typeof le[k]==='number'?le[k].toLocaleString():le[k])+(unit||'') : '미확인';
+      const chk = k => le[k] ? '✅' : '—';
+      const sel = k => le[k] && le[k]!=='미확인' ? le[k] : '미확인';
+      return `<div class="rp-sec">2-1. 상권·입지 평가 (6대 기준)</div>
+      <table class="mini">
+        <tr><th colspan="2" style="text-align:left;color:var(--indigo);font-weight:700;">상권</th></tr>
+        <tr><td>안정적 주거상권 — 10대 인구</td><td class="num">${val('pop_teen','명')}</td></tr>
+        <tr><td>안정적 주거상권 — 20대 인구</td><td class="num">${val('pop_20s','명')}</td></tr>
+        <tr><td>안정적 주거상권 — 아파트 세대</td><td class="num">${val('apt_units','세대')}</td></tr>
+        <tr><td>전형적 학원가 — 입시·교과 학원</td><td class="num">${val('academy_cnt','개')}</td></tr>
+        <tr><td>전형적 학원가 — 월 평균 매출액</td><td class="num">${val('avg_revenue','만원')}</td></tr>
+        <tr><td>학군형 상권 — 고등학교</td><td class="num">${val('highschool_cnt','개')}</td></tr>
+        <tr><td>학군형 상권 — 대학교</td><td class="num">${val('univ_cnt','개')}</td></tr>
+        <tr><th colspan="2" style="text-align:left;color:var(--indigo);font-weight:700;padding-top:8px;">입지</th></tr>
+        <tr><td>접근성 — 보행 300m 이내</td><td class="num">${chk('walk_300m')}</td></tr>
+        <tr><td>접근성 — 교통 (지하철/버스)</td><td class="num">${chk('transit')}</td></tr>
+        <tr><td>접근성 — 가장 가까운 역/정류장</td><td class="num">${val('nearest_station')}</td></tr>
+        <tr><td>가시성 — 간판 노출도</td><td class="num">${sel('sign_visible')}</td></tr>
+        <tr><td>가시성 — 보행 시 노출도</td><td class="num">${sel('walk_visible')}</td></tr>
+        <tr><td>유입 우위성 — 소비자 경유 동선</td><td class="num">${sel('consumer_flow')}</td></tr>
+        <tr><td>유입 우위성 — 경쟁점 대비 동선</td><td class="num">${sel('vs_competitor')}</td></tr>
+      </table>`;
+    })()}
 
     <div class="rp-sec">3. 건물 평가 (${c.bldScore}/100)</div>
     <div class="bld-grid">${bldRows}</div>
@@ -2143,6 +2174,21 @@ function reportText(s,c){
   lines.push(`2. 상권 (반경 약 500m)`);
   lines.push(`- 고등학교 ${s.hs??'?'} / 중학교 ${s.ms??'?'} / 학원 ${s.academy??'?'} / 학생 ${s.students!=null?s.students.toLocaleString():'?'}명`);
   lines.push(`- 경쟁업체 ${s.comp??'?'}곳 / 최근 3년 폐업 ${s.closed??'?'}건 / 평균 운영 ${s.avgyears??'?'}년`);
+  // 상권·입지 평가 (6대 기준)
+  const le = s.locEval || {};
+  if(Object.keys(le).length){
+    lines.push(``);
+    lines.push(`2-1. 상권·입지 평가 (6대 기준)`);
+    lines.push(`[상권]`);
+    const lv = (k,u) => le[k]!=null&&le[k]!=='' ? (typeof le[k]==='number'?le[k].toLocaleString():le[k])+(u||'') : '미확인';
+    lines.push(`- 안정적 주거상권: 10대 ${lv('pop_teen','명')} / 20대 ${lv('pop_20s','명')} / 아파트 ${lv('apt_units','세대')}`);
+    lines.push(`- 전형적 학원가: 학원 ${lv('academy_cnt','개')} / 월 평균 매출 ${lv('avg_revenue','만원')}`);
+    lines.push(`- 학군형 상권: 고등학교 ${lv('highschool_cnt','개')} / 대학교 ${lv('univ_cnt','개')}`);
+    lines.push(`[입지]`);
+    lines.push(`- 접근성: 보행 300m ${le.walk_300m?'✅':'—'} / 교통 ${le.transit?'✅':'—'} / ${lv('nearest_station')}`);
+    lines.push(`- 가시성: 간판 ${le.sign_visible||'미확인'} / 보행 ${le.walk_visible||'미확인'}`);
+    lines.push(`- 유입 우위성: 소비자 동선 ${le.consumer_flow||'미확인'} / 경쟁점 대비 ${le.vs_competitor||'미확인'}`);
+  }
   lines.push(``);
   lines.push(`3. 건물 (${c.bldScore}/100)`);
   lines.push('- ' + BLD_ITEMS.map(it=>`${it.label.split(' (')[0]} ${bldValLabel(it,b[it.key])}`).join(' / '));
@@ -2894,6 +2940,122 @@ async function deleteCafe(){
   }
   try{ await db.collection('cafes').doc(cafeEditId).delete(); closeCafeModal(); cafeDelPending=false; notify('매장을 삭제했어요.'); }
   catch(e){ notify('삭제 실패: ' + (e.message||'')); }
+}
+
+/* ---------- 자동 주간 백업 (8주 보관) ---------- */
+const BACKUP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7일
+const BACKUP_MAX_COUNT = 8; // 최대 8개 보관
+
+async function maybeAutoBackup(){
+  if(!db || !fbUser || !sites.length) return;
+  try{
+    const snaps = await db.collection('backups').orderBy('createdAt','desc').limit(1).get();
+    if(!snaps.empty){
+      const last = snaps.docs[0].data();
+      if(Date.now() - last.createdAt < BACKUP_INTERVAL_MS) return; // 7일 안 지남
+    }
+    await createBackup('auto');
+    await pruneOldBackups();
+  }catch(e){ console.warn('자동 백업 실패:', e); }
+}
+
+async function createBackup(type){
+  if(!db || !fbUser) return;
+  const snapshot = {
+    sites: JSON.parse(JSON.stringify(sites)),
+    regions: JSON.parse(JSON.stringify(regions)),
+    cafes: cafes.map(c=>({id:c.id, regionId:c.regionId, name:c.name, dong:c.dong, brand:c.brand,
+      lockerUsed:c.lockerUsed||'', lockerTotal:c.lockerTotal||'', vendor:c.vendor||'미확인',
+      target:!!c.target, nonres:!!c.nonres, closed:!!c.closed, memo:c.memo||'', lockerDate:c.lockerDate||''}))
+  };
+  const docId = 'bk_' + Date.now();
+  const now = Date.now();
+  const label = new Date(now).toLocaleDateString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit',weekday:'short'});
+  await db.collection('backups').doc(docId).set({
+    id: docId,
+    type, // 'auto' | 'manual'
+    label,
+    createdAt: now,
+    siteCount: sites.length,
+    cafeCount: cafes.length,
+    regionCount: regions.length,
+    data: JSON.stringify(snapshot)
+  });
+  if(type==='manual') notify('백업을 저장했어요.');
+}
+
+async function pruneOldBackups(){
+  if(!db) return;
+  try{
+    const snaps = await db.collection('backups').orderBy('createdAt','desc').get();
+    const docs = []; snaps.forEach(d=>docs.push(d));
+    if(docs.length <= BACKUP_MAX_COUNT) return;
+    const toDelete = docs.slice(BACKUP_MAX_COUNT);
+    const batch = db.batch();
+    toDelete.forEach(d=> batch.delete(d.ref));
+    await batch.commit();
+    console.log(`오래된 백업 ${toDelete.length}개 삭제`);
+  }catch(e){ console.warn('백업 정리 실패:', e); }
+}
+
+async function showBackupList(){
+  if(!db || !fbUser){ notify('로그인이 필요해요.'); return; }
+  const snaps = await db.collection('backups').orderBy('createdAt','desc').get();
+  const list = []; snaps.forEach(d=>list.push(d.data()));
+  if(!list.length){ notify('저장된 백업이 없어요.'); return; }
+  const html = list.map((b,i)=>`
+    <div class="subcard" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;">
+      <div>
+        <b>${esc(b.label)}</b> <span class="badge2" style="background:${b.type==='auto'?'var(--indigo-soft);color:var(--indigo)':'var(--green-bg);color:var(--green)'};">${b.type==='auto'?'자동':'수동'}</span>
+        <div style="font-size:12px;color:var(--sub);margin-top:2px;">후보지 ${b.siteCount}개 · 매장 ${b.cafeCount}개 · 지역 ${b.regionCount}개</div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-ghost btn-sm" onclick="downloadBackup('${b.id}')">💾 다운로드</button>
+        <button class="btn btn-ghost btn-sm" onclick="restoreBackup('${b.id}')" style="color:var(--red);">복원</button>
+      </div>
+    </div>`).join('');
+  const el = document.getElementById('backupListArea');
+  if(el){
+    el.innerHTML = `<div class="sec-title">📦 백업 목록 (최대 ${BACKUP_MAX_COUNT}개 · 매주 자동 생성)</div>${html}
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn btn-primary btn-sm" onclick="createBackup('manual')">📦 지금 백업 만들기</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('backupListArea').innerHTML='';">닫기</button>
+      </div>`;
+    el.scrollIntoView({behavior:'smooth'});
+  }
+}
+
+async function downloadBackup(backupId){
+  const snap = await db.collection('backups').doc(backupId).get();
+  if(!snap.exists){ notify('백업을 찾을 수 없어요.'); return; }
+  const d = snap.data();
+  const blob = new Blob([d.data], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `명당_백업_${d.label.replace(/[^\d]/g,'-')}.json`;
+  a.click(); URL.revokeObjectURL(url);
+  notify('백업 파일을 다운로드했어요.');
+}
+
+async function restoreBackup(backupId){
+  if(!confirm('이 백업으로 복원하면 현재 데이터가 덮어써져요. 계속할까요?')) return;
+  const snap = await db.collection('backups').doc(backupId).get();
+  if(!snap.exists){ notify('백업을 찾을 수 없어요.'); return; }
+  const d = snap.data();
+  try{
+    const snapshot = JSON.parse(d.data);
+    // sites 복원
+    if(snapshot.sites){
+      const batch = db.batch();
+      // 기존 삭제
+      const existing = await db.collection('sites').get();
+      existing.forEach(doc=> batch.delete(doc.ref));
+      // 복원
+      snapshot.sites.forEach(s=> batch.set(db.collection('sites').doc(s.id), s));
+      await batch.commit();
+    }
+    notify(`${d.label} 백업으로 복원했어요. (후보지 ${snapshot.sites?.length||0}개)`);
+  }catch(e){ notify('복원 실패: ' + (e.message||'')); }
 }
 
 buildBldFields();
