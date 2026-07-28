@@ -1688,7 +1688,15 @@ async function renderMap(containerId, pins, center){
       }
       bounds.extend(pos);
     });
-    if(valid.length > 1) map.fitBounds(bounds);
+    if(valid.length > 1){
+      map.fitBounds(bounds);
+      // center가 지정된 경우(후보지) 동 단위 줌으로 후보지 중심 유지
+      if(center && center.lat && center.lng){
+        map.setCenter(new naver.maps.LatLng(center.lat, center.lng));
+        const curZoom = map.getZoom();
+        if(curZoom < 15) map.setZoom(15); // 동 단위 이상으로 줌아웃 방지
+      }
+    }
   }catch(e){
     box.innerHTML = '<div style="padding:20px;text-align:center;color:var(--red);font-size:13px;">지도를 불러오지 못했어요. 네이버 클라우드 콘솔에서 Web 서비스 URL에 gozipnam.github.io 가 등록됐는지 확인해 주세요.</div>';
   }
@@ -2588,7 +2596,7 @@ function renderCafeList(v){
       <button class="chip" onclick="toggleSvMap()">🗺️ 지도</button>
     </div>
     <div style="margin-bottom:12px;">
-      <input id="svCafeSearch" class="inline-input" style="width:100%;font-size:14px;" placeholder="매장명 · 동 · 브랜드 검색" value="${esc(svCafeQuery)}" oninput="svCafeQuery=this.value;renderSurvey();">
+      <input id="svCafeSearch" class="inline-input" style="width:100%;font-size:14px;" placeholder="매장명 · 동 · 브랜드 검색" value="${esc(svCafeQuery)}">
     </div>
     <div id="svMap" style="display:${svMapOpen?'block':'none'};height:340px;border-radius:14px;overflow:hidden;border:1px solid var(--line);margin-bottom:14px;"></div>
     ${list.length ? list.map(c=>{
@@ -2611,6 +2619,15 @@ function renderCafeList(v){
         </div>
       </div>`;
     }).join('') : '<div class="empty"><p>이 조건에 맞는 매장이 없어요.</p></div>'}`;
+  // 검색 입력 이벤트 (한글 IME 호환)
+  setTimeout(()=>{
+    const el = document.getElementById('svCafeSearch');
+    if(!el) return;
+    let composing = false;
+    el.addEventListener('compositionstart', ()=> composing=true);
+    el.addEventListener('compositionend', ()=>{ composing=false; svCafeQuery=el.value; renderSurvey(); requestAnimationFrame(()=>{ const e2=document.getElementById('svCafeSearch'); if(e2){e2.focus(); e2.setSelectionRange(e2.value.length, e2.value.length);} }); });
+    el.addEventListener('input', ()=>{ if(!composing){ svCafeQuery=el.value; renderSurvey(); requestAnimationFrame(()=>{ const e2=document.getElementById('svCafeSearch'); if(e2){e2.focus(); e2.setSelectionRange(e2.value.length, e2.value.length);} }); } });
+  }, 0);
 }
 function setSvFilter(f){ svFilter=f; renderSurvey(); }
 let svMapOpen = false;
@@ -2858,12 +2875,23 @@ async function saveCafe(){
     await db.collection('cafes').doc(id).set(doc);
     closeCafeModal();
     notify(cafeEditId?'매장 정보를 수정했어요.':'매장을 추가했어요.');
-  }catch(e){ notify('저장 실패: ' + (e.message||'')); }
+  }catch(e){ closeCafeModal(); notify('저장 실패: ' + (e.message||'')); }
 }
 let cafeDelPending = false;
 async function deleteCafe(){
   if(!cafeEditId) return;
-  if(!cafeDelPending){ cafeDelPending = true; document.querySelector('#cafeModal .cm-del').textContent='정말 삭제?'; setTimeout(()=>{cafeDelPending=false; const b=document.querySelector('#cafeModal .cm-del'); if(b)b.textContent='삭제';},4000); return; }
+  if(!cafeDelPending){
+    cafeDelPending = true;
+    const delBtn = document.querySelector('#cafeModal .cm-del');
+    delBtn.textContent='⚠ 한 번 더 누르면 삭제됩니다';
+    delBtn.style.background='#CE4A36'; delBtn.style.color='#fff';
+    setTimeout(()=>{
+      cafeDelPending=false;
+      const b=document.querySelector('#cafeModal .cm-del');
+      if(b){ b.textContent='삭제'; b.style.background=''; b.style.color=''; }
+    },4000);
+    return;
+  }
   try{ await db.collection('cafes').doc(cafeEditId).delete(); closeCafeModal(); cafeDelPending=false; notify('매장을 삭제했어요.'); }
   catch(e){ notify('삭제 실패: ' + (e.message||'')); }
 }
