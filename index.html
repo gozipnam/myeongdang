@@ -2441,12 +2441,29 @@ function renderCafeList(v){
       <div><h1>${esc(r.name)}</h1><div class="sv-sub">점유율 조사 ${done}/${cnt} · 점유율 높은 순 정렬</div></div>
       <button class="btn btn-primary" onclick="addCafe()">+ 매장 추가</button>
     </header>
+    <div id="svAutoSearch" style="display:none;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;">
+      <div id="svSearchGuide"></div>
+      <div id="svSearchPaste" style="display:none;margin-top:10px;">
+        <label style="font-size:12px;font-weight:600;color:var(--sub);display:block;margin-bottom:4px;">클로드 응답 JSON 붙여넣기:</label>
+        <textarea id="svPasteArea" rows="4" style="width:100%;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px;font-family:monospace;resize:vertical;" placeholder='[{"name":"...", "dong":"...", "brand":"..."},...]'></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button class="btn btn-primary btn-sm" onclick="parsePastedCafes()">등록하기</button>
+          <button class="btn btn-sm" onclick="document.getElementById('svAutoSearch').style.display='none'">취소</button>
+        </div>
+      </div>
+    </div>
+    ${cnt===0 ? `<div style="text-align:center;padding:30px 0;">
+      <div style="font-size:40px;margin-bottom:10px;">🔍</div>
+      <p style="color:var(--sub);margin-bottom:14px;">아직 등록된 매장이 없어요.<br>자동 검색으로 이 지역의 스터디카페를 한 번에 불러올 수 있어요.</p>
+      <button class="btn btn-primary" onclick="startAutoSearch()">🔍 스터디카페 자동 검색</button>
+    </div>` : ''}
     <div class="toolbar">
       <button class="chip ${svFilter==='all'?'active':''}" onclick="setSvFilter('all')">전체</button>
       <button class="chip ${svFilter==='target'?'active':''}" onclick="setSvFilter('target')">⭐ 전환 타깃</button>
       <button class="chip ${svFilter==='nonres'?'active':''}" onclick="setSvFilter('nonres')">🏠 비상주 추천</button>
       <button class="chip ${svFilter==='todo'?'active':''}" onclick="setSvFilter('todo')">미조사</button>
-      <button class="chip" style="margin-left:auto;" onclick="toggleSvMap()">🗺️ 지도</button>
+      <button class="chip" style="margin-left:auto;" onclick="startAutoSearch()">🔍 자동 검색</button>
+      <button class="chip" onclick="toggleSvMap()">🗺️ 지도</button>
     </div>
     <div id="svMap" style="display:${svMapOpen?'block':'none'};height:340px;border-radius:14px;overflow:hidden;border:1px solid var(--line);margin-bottom:14px;"></div>
     ${list.length ? list.map(c=>{
@@ -2579,6 +2596,94 @@ function cafeFormHTML(c){
     <div class="field" style="margin-top:8px;"><label>메모</label><input id="cf_memo" class="inline-input" value="${esc(c?.memo||'')}"></div>
   </div>`;
 }
+/* ---- 스터디카페 자동 검색 (클립보드 + claude.ai 리디렉트) ---- */
+function startAutoSearch(){
+  const r = regions.find(x=>x.id===svRegionId);
+  if(!r){ notify('지역을 먼저 선택해 주세요.'); return; }
+  const name = r.name; // e.g. "경기 화성시"
+  const prompt = `${name} 지역에 있는 스터디카페를 모두 조사해서 JSON 배열로 알려줘.
+
+요구사항:
+- 동/읍/면 단위로 빠짐없이 조사 (네이버 지도, 카카오맵 기준)
+- 각 매장: name(매장명), dong(동/읍/면), brand(브랜드 or "독립 추정")
+- 폐업 확인된 곳은 제외
+- JSON만 출력 (설명, 백틱, 마크다운 없이 순수 JSON 배열만)
+
+출력 형식 예시:
+[{"name":"공본 스터디카페 동탄점","dong":"반송동","brand":"공본 체인"},{"name":"르하임 화성병점점","dong":"병점동","brand":"르하임(프랜차이즈)"}]`;
+
+  const box = document.getElementById('svAutoSearch');
+  const guide = document.getElementById('svSearchGuide');
+  const paste = document.getElementById('svSearchPaste');
+  box.style.display = 'block';
+  guide.innerHTML = `📋 <b>"${esc(name)}" 스터디카페 검색 요청이 복사됐어요.</b><br>
+    <span style="color:var(--sub);font-size:13px;">클로드에 붙여넣고 → 응답 JSON을 복사 → 아래에 붙여넣기</span><br>
+    <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="window.open('https://claude.ai/new','_blank')">🤖 클로드 열기</button>
+    <button class="btn btn-sm" style="margin-top:8px;" onclick="document.getElementById('svSearchPaste').style.display='block'">📋 결과 붙여넣기</button>`;
+  paste.style.display = 'none';
+  document.getElementById('svPasteArea').value = '';
+  copyText(prompt, '검색 요청을 복사했어요 — 클로드에 붙여넣어 전송하세요.');
+  box.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+function repairJSON(s){
+  // 잘린 JSON 복구: 마지막 완전한 }] 까지만 추출
+  s = s.trim();
+  if(s.startsWith('```')) s = s.replace(/^```json?\s*/,'').replace(/```\s*$/,'');
+  s = s.trim();
+  // 배열 시작 찾기
+  const start = s.indexOf('[');
+  if(start < 0) return null;
+  s = s.slice(start);
+  try{ return JSON.parse(s); }catch(e){}
+  // 잘린 경우: 마지막 } 이후 ] 추가
+  const lastBrace = s.lastIndexOf('}');
+  if(lastBrace > 0){
+    const cut = s.slice(0, lastBrace + 1);
+    try{ return JSON.parse(cut + ']'); }catch(e2){}
+  }
+  return null;
+}
+
+async function parsePastedCafes(){
+  const raw = document.getElementById('svPasteArea').value.trim();
+  if(!raw){ notify('JSON을 붙여넣어 주세요.'); return; }
+  const arr = repairJSON(raw);
+  if(!arr || !Array.isArray(arr) || !arr.length){
+    notify('JSON 형식을 인식할 수 없어요. 클로드 응답을 그대로 복사해서 붙여넣어 주세요.');
+    return;
+  }
+  // 유효성 검사
+  const valid = arr.filter(x => x && typeof x.name === 'string' && x.name.trim());
+  if(!valid.length){ notify('매장명(name)이 있는 항목이 없어요.'); return; }
+
+  // 기존 매장 이름과 중복 체크
+  const existing = new Set(cafes.filter(c=>c.regionId===svRegionId).map(c=>(c.name||'').replace(/\s/g,'')));
+  const newItems = valid.filter(x => !existing.has(x.name.replace(/\s/g,'')));
+  const dupes = valid.length - newItems.length;
+
+  if(!newItems.length){
+    notify(`${valid.length}곳 전부 이미 등록된 매장이에요.`);
+    return;
+  }
+
+  // Firestore 배치 등록
+  const batch = db.batch();
+  newItems.forEach(x => {
+    const docId = svRegionId + '__auto_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+    batch.set(db.collection('cafes').doc(docId), {
+      id: docId, regionId: svRegionId,
+      name: x.name.trim(), dong: (x.dong||'').trim(), brand: (x.brand||'').trim(),
+      addr: '', lockerUsed: '', lockerTotal: '', vendor: '미확인',
+      target: false, nonres: false, lockerDate: '', memo: '',
+      updatedBy: (fbUser&&fbUser.email)||'', updatedAt: Date.now()
+    });
+  });
+  await batch.commit();
+  document.getElementById('svAutoSearch').style.display = 'none';
+  notify(`${newItems.length}곳 등록 완료${dupes?` (중복 ${dupes}곳 제외)`:''}`);
+}
+
 function addCafe(){ cafeEditId=null; openCafeModal(null); }
 function editCafe(id){ cafeEditId=id; openCafeModal(cafes.find(c=>c.id===id)); }
 function openCafeModal(c){
