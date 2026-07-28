@@ -2261,6 +2261,16 @@ function subscribeSurvey(){
     regions = arr;
     if(curTab==='survey') renderSurvey();
     maybeMigrateSurvey();
+    // 시도 미분류 지역 자동 수정 (1회)
+    if(!window._sidoFixed && typeof detectSido==='function'){
+      window._sidoFixed = true;
+      arr.forEach(r=>{
+        const fixed = detectSido(r.name);
+        if(fixed !== r.name){
+          db.collection('regions').doc(r.id).update({ name: fixed }).catch(()=>{});
+        }
+      });
+    }
   }, e=>console.error('regions', e));
   unsubCafes = db.collection('cafes').onSnapshot(snap=>{
     const arr = []; snap.forEach(d=>arr.push(d.data()));
@@ -2478,12 +2488,77 @@ function openRegion(id){ svRegionId=id; svFilter='all'; renderSurvey(); window.s
 function closeRegion(){ svRegionId=null; renderSurvey(); }
 
 /* ---- 지역 CRUD ---- */
+// 시도 자동 매핑 (시·군·구 이름 → 시도)
+const SIDO_MAP = {
+  // 서울 25구
+  ...'종로 중 용산 성동 광진 동대문 중랑 성북 강북 도봉 노원 은평 서대문 마포 양천 강서 구로 금천 영등포 동작 관악 서초 강남 송파 강동'.split(' ').reduce((a,g)=>(a[g+'구']='서울',a),{}),
+  // 부산 16구군
+  ...'중 서 동 영도 부산진 동래 남 북 해운대 사하 금정 강서 연제 수영 사상'.split(' ').reduce((a,g)=>(a[g+'구']='부산',a),{}),
+  기장군:'부산',
+  // 대구 8구군
+  ...'중 동 서 남 북 수성 달서'.split(' ').reduce((a,g)=>(a[g+'구']='대구',a),{}), 달성군:'대구',
+  // 인천 10구군
+  ...'중 동 미추홀 연수 남동 부평 계양 서'.split(' ').reduce((a,g)=>(a[g+'구']='인천',a),{}), 강화군:'인천', 옹진군:'인천',
+  // 광주 5구
+  ...'동 서 남 북 광산'.split(' ').reduce((a,g)=>(a[g+'구']='광주',a),{}),
+  // 대전 5구
+  ...'동 중 서 유성 대덕'.split(' ').reduce((a,g)=>(a[g+'구']='대전',a),{}),
+  // 울산 5구군
+  ...'중 남 동 북'.split(' ').reduce((a,g)=>(a[g+'구']='울산',a),{}), 울주군:'울산',
+  // 세종
+  세종시:'세종',
+  // 경기 31시군
+  ...'수원 성남 의정부 안양 부천 광명 평택 동두천 안산 고양 과천 구리 남양주 오산 시흥 군포 의왕 하남 용인 파주 이천 안성 김포 화성 광주 양주 포천 여주'.split(' ').reduce((a,c)=>(a[c+'시']='경기',a),{}),
+  연천군:'경기', 가평군:'경기', 양평군:'경기',
+  // 강원 18시군
+  ...'춘천 원주 강릉 동해 태백 속초 삼척'.split(' ').reduce((a,c)=>(a[c+'시']='강원',a),{}),
+  ...'홍천 횡성 영월 평창 정선 철원 화천 양구 인제 고성 양양'.split(' ').reduce((a,c)=>(a[c+'군']='강원',a),{}),
+  // 충북 12시군
+  ...'청주 충주 제천'.split(' ').reduce((a,c)=>(a[c+'시']='충북',a),{}),
+  ...'보은 옥천 영동 증평 진천 괴산 음성 단양'.split(' ').reduce((a,c)=>(a[c+'군']='충북',a),{}),
+  // 충남 15시군
+  ...'천안 공주 보령 아산 서산 논산 계룡 당진'.split(' ').reduce((a,c)=>(a[c+'시']='충남',a),{}),
+  ...'금산 부여 서천 청양 홍성 예산 태안'.split(' ').reduce((a,c)=>(a[c+'군']='충남',a),{}),
+  // 전북 14시군
+  ...'전주 군산 익산 정읍 남원 김제'.split(' ').reduce((a,c)=>(a[c+'시']='전북',a),{}),
+  ...'완주 진안 무주 장수 임실 순창 고창 부안'.split(' ').reduce((a,c)=>(a[c+'군']='전북',a),{}),
+  // 전남 22시군
+  ...'목포 여수 순천 나주 광양'.split(' ').reduce((a,c)=>(a[c+'시']='전남',a),{}),
+  ...'담양 곡성 구례 고흥 보성 화순 장흥 강진 해남 영암 무안 함평 영광 장성 완도 진도 신안'.split(' ').reduce((a,c)=>(a[c+'군']='전남',a),{}),
+  // 경북 23시군
+  ...'포항 경주 김천 안동 구미 영주 영천 상주 문경 경산'.split(' ').reduce((a,c)=>(a[c+'시']='경북',a),{}),
+  ...'군위 의성 청송 영양 영덕 청도 고령 성주 칠곡 예천 봉화 울진 울릉'.split(' ').reduce((a,c)=>(a[c+'군']='경북',a),{}),
+  // 경남 18시군
+  ...'창원 진주 통영 사천 김해 밀양 거제 양산'.split(' ').reduce((a,c)=>(a[c+'시']='경남',a),{}),
+  ...'의령 함안 창녕 고성 남해 하동 산청 함양 거창 합천'.split(' ').reduce((a,c)=>(a[c+'군']='경남',a),{}),
+  // 제주
+  제주시:'제주', 서귀포시:'제주'
+};
+function detectSido(name){
+  const n = name.trim();
+  // 이미 "경기 화성시" 형태면 그대로
+  const parts = n.split(/\s+/);
+  if(parts.length >= 2){
+    const knownSido = '서울 부산 대구 인천 광주 대전 울산 세종 경기 강원 충북 충남 전북 전남 경북 경남 제주'.split(' ');
+    if(knownSido.includes(parts[0])) return n;
+  }
+  // 시·군·구 이름으로 시도 찾기
+  const sido = SIDO_MAP[n];
+  if(sido) return sido + ' ' + n;
+  // 못 찾으면 그대로
+  return n;
+}
+
 async function addRegion(){
-  const name = prompt('지역 이름을 입력하세요 (예: 서울 강남구)');
-  if(!name || !name.trim()) return;
+  const raw = prompt('지역 이름을 입력하세요 (예: 화성시, 강남구, 서울 강남구)');
+  if(!raw || !raw.trim()) return;
+  const name = detectSido(raw.trim());
+  if(name !== raw.trim()){
+    if(!confirm(`"${raw.trim()}" → "${name}"(으)로 등록할까요?`)) return;
+  }
   const id = 'r' + Date.now();
   try{
-    await db.collection('regions').doc(id).set({ id, name:name.trim(), order: (regions.length+1)*10 });
+    await db.collection('regions').doc(id).set({ id, name, order: (regions.length+1)*10 });
     notify('지역을 추가했어요.');
   }catch(e){ notify('지역 추가 실패: ' + (e.message||'')); }
 }
