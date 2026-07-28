@@ -2613,16 +2613,23 @@ function startAutoSearch(){
   const r = regions.find(x=>x.id===svRegionId);
   if(!r){ notify('지역을 먼저 선택해 주세요.'); return; }
   const name = r.name; // e.g. "경기 화성시"
-  const prompt = `${name} 지역에 있는 스터디카페를 모두 조사해서 JSON 배열로 알려줘.
+  const prompt = `${name} 지역에 있는 "스터디카페"를 모두 조사해서 JSON 배열로 알려줘.
 
-요구사항:
-- 동/읍/면 단위로 빠짐없이 조사 (네이버 지도, 카카오맵 기준)
-- 각 매장: name(매장명), dong(동/읍/면), brand(브랜드 or "독립 추정")
+중요 조건:
+- 반드시 "스터디카페" 또는 "독서실"만 포함 (일반 카페, 커피숍, 프랜차이즈 카페 제외)
+- 매장명에 "스터디카페", "스터디", "독서실", "스터디룸" 등이 포함된 곳만
+- 할리스, 스타벅스, 투썸 같은 일반 카페는 절대 포함하지 마
+- 동/읍/면 단위로 빠짐없이 조사 (네이버 지도 기준)
 - 폐업 확인된 곳은 제외
 - JSON만 출력 (설명, 백틱, 마크다운 없이 순수 JSON 배열만)
 
-출력 형식 예시:
-[{"name":"공본 스터디카페 동탄점","dong":"반송동","brand":"공본 체인"},{"name":"르하임 화성병점점","dong":"병점동","brand":"르하임(프랜차이즈)"}]`;
+각 매장 필드:
+- name: 매장명 (예: "공본 스터디카페 동탄점")
+- dong: 동/읍/면 (예: "반송동")
+- brand: 브랜드명 또는 "독립" (예: "공본 체인", "독립")
+
+출력 형식:
+[{"name":"공본 스터디카페 동탄점","dong":"반송동","brand":"공본 체인"},{"name":"르하임 화성병점점","dong":"병점동","brand":"르하임"}]`;
 
   const box = document.getElementById('svAutoSearch');
   const guide = document.getElementById('svSearchGuide');
