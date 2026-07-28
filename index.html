@@ -1041,7 +1041,7 @@ async function toggleSiteMap(id){
   // 주변 조사 매장(좌표 있는 것) 함께 표시
   cafes.filter(c=>c.lat && c.lng).forEach(c=>{
     const o = occOf(c);
-    pins.push({ lat:c.lat, lng:c.lng, label:`${c.name}${c.closed?' 폐업':o!=null?` ${o}%`:''}`,
+    pins.push({ lat:c.lat, lng:c.lng, label:`${shortName(c.name)}${c.closed?' 폐업':o!=null?` ${o}%`:''}`,
       color: cafeStatusColor(c),
       sub:`${c.name} · ${c.closed?'폐업':`사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}`}` });
   });
@@ -2369,6 +2369,18 @@ function renderSurvey(){
 }
 const VENDOR_COLOR = {'고스카':'#0E6E5C','픽코':'#C0433B','제로아이즈':'#2F6DB5','와우플':'#7A4FA3','SSAMCAFE':'#C77A1E','스터디모아':'#2E8B6F','스터디큐브':'#4A5568','기타':'#8A8F98'};
 function svProvince(name){ return (name||'').split(' ')[0] || '기타'; }
+// 지도 핀용 매장명 약칭: "초심 동백역점" → "초심", "공본 수지성복센터" → "공본"
+function shortName(n){
+  if(!n) return '';
+  // "스터디카페" 등 공통 접미어 제거
+  n = n.replace(/\s*스터디카페\s*/g,' ').replace(/\s*스터디까페\s*/g,' ').replace(/\s*스터디\s*/g,' ').trim();
+  // 지점명 패턴 제거: "OO점", "OO센터", "OO지점" 등
+  n = n.replace(/\s+\S*(점|센터|지점|라운지|타워|플라자)$/,'').trim();
+  // 남은 게 2단어 이상이면 첫 단어만
+  const parts = n.split(/\s+/);
+  if(parts.length >= 2) return parts[0];
+  return n;
+}
 
 function renderRegionList(v){
   const counts = {}, occSum = {}, occN = {}, tCnt = {}, nrCnt = {};
@@ -2495,7 +2507,7 @@ function drawSurveyMap(){
   const list = cafes.filter(c=>c.regionId===svRegionId && c.lat && c.lng);
   const pins = list.map(c=>{
     const o = occOf(c);
-    return { lat:c.lat, lng:c.lng, label:`${c.name}${c.closed?' 폐업':o!=null?` ${o}%`:''}`,
+    return { lat:c.lat, lng:c.lng, label:`${shortName(c.name)}${c.closed?' 폐업':o!=null?` ${o}%`:''}`,
              color: cafeStatusColor(c),
              sub:`${c.name} · ${c.brand||''} · ${c.closed?'폐업':`사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}`}${c.vendor&&c.vendor!=='미확인'?` · ${c.vendor}`:''}` };
   });
