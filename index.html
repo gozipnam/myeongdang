@@ -2620,8 +2620,26 @@ function renderRegionList(v){
   v.innerHTML = `
     <header style="display:flex;justify-content:space-between;align-items:flex-start;">
       <div><h1>스터디카페 조사</h1><div class="sv-sub">지역을 선택하세요 — 사물함 점유율 상권분석 · 고스카 전환 타깃 · 비상주 추천</div></div>
-      <button class="btn btn-primary" onclick="addRegion()">+ 지역 추가</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+        <button class="btn btn-ghost btn-sm" onclick="toggleNaverImport()">📥 네이버 책갈피</button>
+        <button class="btn btn-primary" onclick="addRegion()">+ 지역 추가</button>
+      </div>
     </header>
+    <div id="naverImportPanel" style="display:none;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px;">네이버 책갈피 가져오기</div>
+      <div style="font-size:12.5px;color:var(--sub);line-height:1.6;margin-bottom:10px;">
+        ① 크롬에서 <b>pages.map.naver.com</b> 접속 → F12 → Console<br>
+        ② 수집 스크립트 붙여넣고 Enter → JSON 파일 자동 다운로드<br>
+        ③ 아래에서 그 파일을 선택하면 주소 기준으로 지역이 자동 분류돼 등록됩니다
+      </div>
+      <input type="file" id="naverJsonFile" accept=".json,application/json" style="font-size:13px;margin-bottom:8px;">
+      <div id="naverImportStatus" style="font-size:12.5px;color:var(--sub);margin-bottom:8px;"></div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary btn-sm" onclick="runNaverImport(false)">미리보기</button>
+        <button class="btn btn-primary btn-sm" onclick="runNaverImport(true)">등록하기</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleNaverImport()">닫기</button>
+      </div>
+    </div>
     <div class="total-strip">
       <div class="tstat"><b>${totCafe}</b><span>전체 매장</span></div>
       <div class="tstat"><b>${totOccN}</b><span>점유율 조사 완료</span></div>
@@ -3004,6 +3022,202 @@ async function parsePastedCafes(){
   await batch.commit();
   document.getElementById('svAutoSearch').style.display = 'none';
   notify(`${newItems.length}곳 등록 완료${dupes?` (중복 ${dupes}곳 제외)`:''}`);
+}
+
+/* ---------- 네이버 책갈피 가져오기 ---------- */
+function toggleNaverImport(){
+  const p = document.getElementById('naverImportPanel');
+  if(p) p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+// 시도 표기 통일
+const NV_PROVINCE = {
+  '서울특별시':'서울','서울시':'서울','서울':'서울',
+  '부산광역시':'부산','부산시':'부산','부산':'부산',
+  '대구광역시':'대구','대구시':'대구','대구':'대구',
+  '인천광역시':'인천','인천시':'인천','인천':'인천',
+  '광주광역시':'광주','광주시':'광주',
+  '대전광역시':'대전','대전시':'대전','대전':'대전',
+  '울산광역시':'울산','울산시':'울산','울산':'울산',
+  '세종특별자치시':'세종','세종시':'세종','세종':'세종',
+  '경기도':'경기','경기':'경기',
+  '강원특별자치도':'강원','강원도':'강원','강원':'강원',
+  '충청북도':'충북','충북':'충북','충청남도':'충남','충남':'충남',
+  '전북특별자치도':'전북','전라북도':'전북','전북':'전북',
+  '전라남도':'전남','전남':'전남',
+  '경상북도':'경북','경북':'경북','경상남도':'경남','경남':'경남',
+  '제주특별자치도':'제주','제주도':'제주','제주':'제주'
+};
+
+// 주소 → { region:"경기 화성시", dong:"산척동" }
+function parseNaverAddr(addr){
+  if(!addr) return null;
+  const t = addr.trim().replace(/\s+/g,' ').split(' ');
+  if(t.length < 2) return null;
+  const prov = NV_PROVINCE[t[0]];
+  if(!prov) return null;
+  let sgg = t[1] || '';
+  // "화성시 동탄구" 처럼 시 뒤에 구가 오면 시까지만 사용
+  if(!/[시군구]$/.test(sgg)) return null;
+  const region = prov + ' ' + sgg;
+  // 동/읍/면/가/리 찾기
+  let dong = '';
+  for(let i=2;i<t.length;i++){
+    if(/(동|읍|면|가|리)$/.test(t[i]) && !/(로|길)$/.test(t[i])){ dong = t[i]; break; }
+  }
+  return { region, dong };
+}
+
+// displayName + memo 에서 점유율·사물함·조사일·브랜드 추출
+// 예: "플랜에이 20% 14/68, 260727" / "폐점" / "미라클 27%" / memo "26-07-09 ← 24-11-08,29%"
+function parseNaverOcc(displayName, memo){
+  const out = { used:'', total:'', pct:null, closed:false, date:'', brand:'', history:'' };
+  const d = (displayName||'').trim();
+  const mm = (memo||'').trim();
+
+  if(/폐업|폐점/.test(d) || /폐업|폐점/.test(mm)) out.closed = true;
+
+  // 사물함 이용/총 (예: 14/68)
+  const frac = d.match(/(\d{1,4})\s*\/\s*(\d{1,4})/);
+  if(frac){ out.used = frac[1]; out.total = frac[2]; }
+
+  // 점유율 % (사물함이 없을 때 참고용)
+  const pm = d.match(/(\d{1,3})\s*%/);
+  if(pm) out.pct = Number(pm[1]);
+
+  // 조사일: displayName 뒤 6자리(260727) → 2026-07-27
+  const dm = d.match(/(?:^|[,\s])(\d{6})(?:\D|$)/);
+  if(dm){
+    const s = dm[1];
+    out.date = `20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`;
+  } else {
+    // memo 앞부분 YY-MM-DD
+    const mdate = mm.match(/(\d{2})-(\d{2})-(\d{2})/);
+    if(mdate) out.date = `20${mdate[1]}-${mdate[2]}-${mdate[3]}`;
+  }
+
+  // 브랜드 약칭: displayName 첫 토큰 (숫자·% 제외)
+  const bt = d.split(/[\s,]+/)[0];
+  if(bt && !/^\d/.test(bt) && !/폐업|폐점/.test(bt)) out.brand = bt;
+
+  // 점유율 이력 (memo에 ← 로 구분된 기록)
+  if(mm.includes('←')) out.history = mm;
+
+  return out;
+}
+
+let naverParsed = null;
+
+async function runNaverImport(apply){
+  const st = document.getElementById('naverImportStatus');
+  const fileEl = document.getElementById('naverJsonFile');
+  const file = fileEl && fileEl.files && fileEl.files[0];
+  if(!file){ st.textContent = 'JSON 파일을 먼저 선택해 주세요.'; return; }
+  if(!db || !fbUser){ st.textContent = '로그인이 필요해요.'; return; }
+
+  st.textContent = '파일을 읽는 중…';
+  let rows;
+  try{
+    rows = JSON.parse(await file.text());
+    if(!Array.isArray(rows)) throw new Error('배열이 아님');
+  }catch(e){ st.textContent = 'JSON을 읽을 수 없어요: ' + (e.message||''); return; }
+
+  // 1) 파싱 + 지역 분류
+  const byRegion = {}; const skipped = [];
+  rows.forEach(b=>{
+    const storeName = (b.name || b.displayName || '').trim();   // 정식 상호
+    const label = (b.displayName || '').trim();                  // 점유율 라벨
+    const addr = b.address || b.mappedAddress || '';
+    const p = parseNaverAddr(addr);
+    if(!storeName || !p){ skipped.push(storeName || addr || '(이름·주소 없음)'); return; }
+    (byRegion[p.region] = byRegion[p.region] || []).push({
+      name: storeName, label, dong: p.dong, addr,
+      sid: b.sid || '', lat: b.lat, lng: b.lng,
+      memo: b.memo || '', folder: b.folder || ''
+    });
+  });
+
+  const regionNames = Object.keys(byRegion).sort();
+  const totalOk = regionNames.reduce((a,r)=>a+byRegion[r].length,0);
+
+  // 2) 중복 판정 (기존 cafes와 대조)
+  const existBySid = new Map();
+  const existByName = new Set();
+  const existCoords = [];
+  cafes.forEach(c=>{
+    if(c.naverSid) existBySid.set(c.naverSid, c);
+    existByName.add((c.name||'').replace(/\s/g,''));
+    if(c.lat && c.lng) existCoords.push([c.lat, c.lng]);
+  });
+  const isDupe = it => {
+    if(it.sid && existBySid.has(it.sid)) return true;
+    if(existByName.has(it.name.replace(/\s/g,''))) return true;
+    if(it.lat && it.lng && existCoords.some(([la,ln])=> Math.abs(la-it.lat)<=0.0005 && Math.abs(ln-it.lng)<=0.0005)) return true;
+    return false;
+  };
+  let newCnt = 0, dupCnt = 0;
+  regionNames.forEach(r=> byRegion[r].forEach(it=>{ if(isDupe(it)) dupCnt++; else newCnt++; }));
+
+  const newRegions = regionNames.filter(rn=> !regions.some(r=>r.name===rn));
+
+  if(!apply){
+    naverParsed = byRegion;
+    st.innerHTML = `<b>미리보기</b> — 읽은 항목 ${rows.length}건<br>`
+      + `등록 대상 <b style="color:var(--teal)">${newCnt}건</b> · 중복 제외 ${dupCnt}건 · 주소 인식 실패 ${skipped.length}건<br>`
+      + `지역 ${regionNames.length}개 (신규 생성 ${newRegions.length}개)<br>`
+      + `<div style="max-height:140px;overflow:auto;margin-top:6px;font-size:12px;line-height:1.6;">`
+      + regionNames.map(r=>`${esc(r)} <b>${byRegion[r].length}</b>곳${newRegions.includes(r)?' <span style="color:var(--green)">신규</span>':''}`).join(' · ')
+      + `</div>`;
+    return;
+  }
+
+  // 3) 지역 생성
+  st.textContent = '지역을 만드는 중…';
+  const regionIdOf = {};
+  regions.forEach(r=> regionIdOf[r.name] = r.id);
+  let order = (regions.length + 1) * 10;
+  for(const rn of newRegions){
+    const id = 'r' + Date.now() + Math.random().toString(36).slice(2,6);
+    await db.collection('regions').doc(id).set({ id, name: rn, order: order += 10 });
+    regionIdOf[rn] = id;
+  }
+
+  // 4) 매장 배치 등록 (400건 단위)
+  let done = 0;
+  const queue = [];
+  regionNames.forEach(rn=>{
+    byRegion[rn].forEach(it=>{
+      if(isDupe(it)) return;
+      const m = parseNaverOcc(it.label, it.memo);
+      const docId = regionIdOf[rn] + '__nv_' + (it.sid || Math.random().toString(36).slice(2,10));
+      const memoParts = [];
+      if(it.label) memoParts.push(`라벨: ${it.label}`);
+      if(m.history) memoParts.push(`이력: ${m.history}`);
+      else if(it.memo) memoParts.push(it.memo);
+      queue.push([docId, {
+        id: docId, regionId: regionIdOf[rn],
+        name: it.name, dong: it.dong, brand: m.brand, addr: it.addr,
+        lat: it.lat ?? null, lng: it.lng ?? null,
+        naverSid: it.sid || '',
+        lockerUsed: m.used, lockerTotal: m.total, vendor: '미확인',
+        target: false, nonres: false, closed: m.closed,
+        lockerDate: m.date, memo: memoParts.join(' · '),
+        updatedBy: (fbUser&&fbUser.email)||'', updatedAt: Date.now()
+      }]);
+    });
+  });
+
+  for(let i=0;i<queue.length;i+=400){
+    const chunk = queue.slice(i, i+400);
+    const batch = db.batch();
+    chunk.forEach(([id, data])=> batch.set(db.collection('cafes').doc(id), data));
+    await batch.commit();
+    done += chunk.length;
+    st.textContent = `등록 중… ${done}/${queue.length}`;
+  }
+
+  st.innerHTML = `<b style="color:var(--green)">✅ 완료</b> — ${done}건 등록 · 중복 ${dupCnt}건 제외 · 지역 ${newRegions.length}개 신규 생성`;
+  notify(`네이버 책갈피 ${done}건을 등록했어요.`);
 }
 
 function addCafe(){ cafeEditId=null; openCafeModal(null); }
