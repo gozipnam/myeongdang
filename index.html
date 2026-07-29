@@ -583,7 +583,27 @@ function calc(s){
   const surv = (cl == null ? 3 : cl === 0 ? 6 : cl === 1 ? 4 : cl === 2 ? 2 : 0)
              + (ay == null ? 2 : ay >= 5 ? 4 : ay >= 3 ? 3 : ay >= 2 ? 1 : 0);
 
-  const score = Math.min(100, cost + demand + compScore + loc + surv); // 상권점수
+  // 앤딩 성공패턴 가산점 (locEval 데이터 기반, 최대 +12)
+  const le = s.locEval || {};
+  let successBonus = 0;
+  // ① 학원가 밀집 주거상권 (학원 100+, 아파트 4000+) → +3
+  if(Number(le.academy_cnt) >= 100 && Number(le.apt_units) >= 4000) successBonus += 3;
+  else if(Number(le.academy_cnt) >= 50 || Number(le.apt_units) >= 3000) successBonus += 1;
+  // ② 10대·20대 고밀도 (각 2000+) → +2
+  if(Number(le.pop_teen) >= 2000 && Number(le.pop_20s) >= 2000) successBonus += 2;
+  else if(Number(le.pop_teen) >= 1500 || Number(le.pop_20s) >= 1500) successBonus += 1;
+  // ③ 저층 접근성 (B1~2층) → +2
+  const flr = s.floor ?? 99;
+  if(flr >= -1 && flr <= 2) successBonus += 2;
+  // ④ 교통 접근성 (지하철 도보 5분 이내) → +2
+  if(le.transit) successBonus += 2;
+  // ⑤ 귀가 동선 우위 → +2
+  if(le.consumer_flow === '우위') successBonus += 2;
+  else if(le.consumer_flow === '보통') successBonus += 1;
+  // ⑥ 간판 가시성 → +1
+  if(le.sign_visible === '상') successBonus += 1;
+
+  const score = Math.min(100, cost + demand + compScore + loc + surv + successBonus); // 상권점수
 
   // 건물 적합도 100 (10개 항목 × 10점)
   const b = s.bld || {};
@@ -608,7 +628,7 @@ function calc(s){
   const grade = (dep <= 3500 && rent <= 200) ? 'green' : (dep <= 5000 && rent <= 250) ? 'amber' : 'red';
   const verdict = total >= 80 ? '강력 검토' : total >= 65 ? '검토 권장' : total >= 50 ? '신중 검토' : '보류 추천';
 
-  return { fixed, pyeong, score, cost, demand, compScore, loc, surv, bldScore, total, rank, risk, grade, verdict };
+  return { fixed, pyeong, score, cost, demand, compScore, loc, surv, successBonus, bldScore, total, rank, risk, grade, verdict };
 }
 
 const gradeLabel = { green:'초록 · 목표 조건 충족', amber:'노랑 · 조건 근접', red:'빨강 · 조건 초과' };
@@ -887,6 +907,7 @@ function detailHTML(s,c){
     <div class="break-row"><span>경쟁 강도</span><b>${c.compScore} / 20</b></div>
     <div class="break-row"><span>입지 (층·면적·엘리베이터·주차)</span><b>${c.loc} / 15</b></div>
     <div class="break-row" style="border-bottom:none;"><span>상권 생존성</span><b>${c.surv} / 10</b></div>
+    ${c.successBonus > 0 ? `<div class="break-row" style="border-bottom:none;color:var(--green);"><span>⭐ 앤딩 성공패턴 가산</span><b>+${c.successBonus}</b></div>` : ''}
 
     <div class="sec-title">건물 평가 (${c.bldScore}/100)</div>
     <div class="bld-grid">
