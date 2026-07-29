@@ -1115,7 +1115,7 @@ async function toggleSiteMap(id){
   cafes.filter(c=>c.lat && c.lng).forEach(c=>{
     const o = occOf(c);
     pins.push({ lat:c.lat, lng:c.lng, label:`${shortName(c.name)}${c.closed?' 폐업':o!=null?` ${o}%`:''}`,
-      color: cafeStatusColor(c),
+      color: cafeStatusColor(c), occ: o ?? -1,
       sub:`${c.name} · ${c.closed?'폐업':`사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}`}` });
   });
   renderMap('siteMap-' + id, pins, center);
@@ -1689,6 +1689,14 @@ async function renderMap(containerId, pins, center){
         naver.maps.Event.addListener(mk,'click',()=>{
           if(p.cafeId && !p.isMe){ editCafe(p.cafeId); }
           else { info.open(map, mk); }
+        });
+      }
+      // 점유율 80% 이상이면 반경 50m 원 표시
+      if(p.occ >= 80){
+        new naver.maps.Circle({
+          map, center: pos, radius: 50,
+          strokeColor: '#CE4A36', strokeOpacity: 0.6, strokeWeight: 1.5,
+          fillColor: '#CE4A36', fillOpacity: 0.12
         });
       }
       bounds.extend(pos);
@@ -2776,7 +2784,7 @@ function drawSurveyMap(){
   const pins = list.map(c=>{
     const o = occOf(c);
     return { lat:c.lat, lng:c.lng, label:`${shortName(c.name)}${c.closed?' 폐업':o!=null?` ${o}%`:''}`,
-             color: cafeStatusColor(c),
+             color: cafeStatusColor(c), occ: o ?? -1,
              cafeId: c.id,
              sub:`${c.name} · ${c.brand||''} · ${c.closed?'폐업':`사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}`}${c.vendor&&c.vendor!=='미확인'?` · ${c.vendor}`:''}` };
   });
