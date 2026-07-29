@@ -1685,8 +1685,11 @@ async function renderMap(containerId, pins, center){
         }
       });
       if(p.sub){
-        const info = new naver.maps.InfoWindow({ content:`<div style="padding:8px 10px;font-size:12.5px;">${esc(p.sub)}</div>` });
-        naver.maps.Event.addListener(mk,'click',()=>{ info.open(map, mk); });
+        const info = new naver.maps.InfoWindow({ content:`<div style="padding:8px 10px;font-size:12.5px;">${esc(p.sub)}${p.cafeId?'<br><b style="color:var(--teal);cursor:pointer;">탭하여 수정</b>':''}</div>` });
+        naver.maps.Event.addListener(mk,'click',()=>{
+          if(p.cafeId && !p.isMe){ editCafe(p.cafeId); }
+          else { info.open(map, mk); }
+        });
       }
       bounds.extend(pos);
     });
@@ -2374,6 +2377,34 @@ let curTab = 'site';
 let svRegionId = null;   // 열람 중인 지역
 let svFilter = 'all';    // all | target | nonres | todo
 let svCafeQuery = '';    // 매장 검색어
+let myLat = null, myLng = null; // GPS 현재 위치
+
+// 거리 계산 (Haversine, 미터 단위)
+function haversine(lat1,lng1,lat2,lng2){
+  const R=6371000, toR=Math.PI/180;
+  const dLat=(lat2-lat1)*toR, dLng=(lng2-lng1)*toR;
+  const a=Math.sin(dLat/2)**2 + Math.cos(lat1*toR)*Math.cos(lat2*toR)*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+// GPS 위치 추적 시작
+function startGeoWatch(){
+  if(!navigator.geolocation) return;
+  navigator.geolocation.watchPosition(
+    pos=>{
+      myLat = pos.coords.latitude;
+      myLng = pos.coords.longitude;
+    },
+    ()=>{}, // 실패 무시
+    { enableHighAccuracy: true, maximumAge: 30000 }
+  );
+  // 즉시 1회도
+  navigator.geolocation.getCurrentPosition(
+    pos=>{ myLat = pos.coords.latitude; myLng = pos.coords.longitude; },
+    ()=>{}
+  );
+}
+startGeoWatch();
 let cafeEditId = null;
 
 function occOf(c){
@@ -2606,15 +2637,23 @@ function renderCafeList(v){
     const q = svCafeQuery.trim().toLowerCase();
     list = list.filter(c=> (c.name||'').toLowerCase().includes(q) || (c.dong||'').toLowerCase().includes(q) || (c.brand||'').toLowerCase().includes(q) || (c.vendor||'').toLowerCase().includes(q));
   }
-  list.sort((a,b)=> (occOf(b) ?? -1) - (occOf(a) ?? -1));
+  // 위치 기반 정렬 (가까운 순) 또는 점유율 순
+  const sortByLoc = myLat && myLng;
+  if(sortByLoc){
+    list.forEach(c=>{ c._dist = (c.lat&&c.lng) ? haversine(myLat,myLng,c.lat,c.lng) : 99999; });
+    list.sort((a,b)=> a._dist - b._dist);
+  } else {
+    list.sort((a,b)=> (occOf(b) ?? -1) - (occOf(a) ?? -1));
+  }
 
   const done = cafes.filter(c=>c.regionId===svRegionId).map(occOf).filter(x=>x!=null).length;
   const cnt = cafes.filter(c=>c.regionId===svRegionId).length;
+  const sortLabel = sortByLoc ? '📍 가까운 순 정렬' : '점유율 높은 순 정렬';
 
   v.innerHTML = `
     <div class="sv-crumb" onclick="closeRegion()">← 지역 목록</div>
     <header style="display:flex;justify-content:space-between;align-items:flex-start;">
-      <div><h1>${esc(r.name)}</h1><div class="sv-sub">점유율 조사 ${done}/${cnt} · 점유율 높은 순 정렬</div></div>
+      <div><h1>${esc(r.name)}</h1><div class="sv-sub">점유율 조사 ${done}/${cnt} · ${sortLabel}</div></div>
       <button class="btn btn-primary" onclick="addCafe()">+ 매장 추가</button>
     </header>
     <div id="svAutoSearch" style="display:none;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;">
@@ -2654,7 +2693,7 @@ function renderCafeList(v){
       const occBadge = c.closed ? '<span class="badge2" style="background:#2B2B2B;color:#fff;">폐업</span>'
         : o!=null ? `<span class="badge2" style="background:${o>=80?'#FAE8E4':o>=60?'var(--sv-target-bg)':'var(--sv-warn-bg)'};color:${statusCol};">점유율 ${o}%${o>=80?' 🔴':''}</span>` : '';
       return `<div class="v-card" style="border-left:4px solid ${statusCol};${c.closed?'opacity:.6;':''}" onclick="editCafe('${c.id}')">
-        <div class="v-name">${c.target?'<span class="star">⭐</span>':''}${esc(c.name)}${c.closed?' <span style="font-size:12px;color:#2B2B2B;font-weight:700;">(폐업)</span>':''}</div>
+        <div class="v-name">${c.target?'<span class="star">⭐</span>':''}${esc(c.name)}${(sortByLoc && c._dist!=null && c._dist<99999)?`<span style="font-size:11px;color:var(--sub);margin-left:6px;">📍 ${c._dist<1000?Math.round(c._dist)+'m':(c._dist/1000).toFixed(1)+'km'}</span>`:''}${c.closed?' <span style="font-size:12px;color:#2B2B2B;font-weight:700;">(폐업)</span>':''}</div>
         <div class="v-sub">${esc(c.dong||'')}${c.brand?` · ${esc(c.brand)}`:''}${c.lockerDate?` · 조사 ${esc(c.lockerDate)}`:''}</div>
         ${o!=null&&!c.closed?`<div class="occ-row"><b style="color:${statusCol}">${o}%</b><span>사물함 ${esc(c.lockerUsed)}/${esc(c.lockerTotal)}</span></div>`:''}
         <div class="v-badges">
@@ -2665,15 +2704,68 @@ function renderCafeList(v){
         </div>
       </div>`;
     }).join('') : '<div class="empty"><p>이 조건에 맞는 매장이 없어요.</p></div>'}`;
-  // 검색 입력 이벤트 (한글 IME 호환)
+  // 검색 입력 이벤트 (한글 IME 호환 — 목록만 다시 그림, input은 보존)
   setTimeout(()=>{
     const el = document.getElementById('svCafeSearch');
-    if(!el) return;
-    let composing = false;
-    el.addEventListener('compositionstart', ()=> composing=true);
-    el.addEventListener('compositionend', ()=>{ composing=false; svCafeQuery=el.value; renderSurvey(); requestAnimationFrame(()=>{ const e2=document.getElementById('svCafeSearch'); if(e2){e2.focus(); e2.setSelectionRange(e2.value.length, e2.value.length);} }); });
-    el.addEventListener('input', ()=>{ if(!composing){ svCafeQuery=el.value; renderSurvey(); requestAnimationFrame(()=>{ const e2=document.getElementById('svCafeSearch'); if(e2){e2.focus(); e2.setSelectionRange(e2.value.length, e2.value.length);} }); } });
+    if(!el || el._bound) return;
+    el._bound = true;
+    let debounceTimer = null;
+    el.addEventListener('input', ()=>{
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(()=>{
+        svCafeQuery = el.value;
+        updateCafeListOnly();
+      }, 200);
+    });
   }, 0);
+}
+function updateCafeListOnly(){
+  // 카페 목록 영역만 다시 그림 (검색 input DOM은 건드리지 않음)
+  const container = document.querySelector('#surveyView .v-card, #surveyView .empty');
+  if(!container) { renderSurvey(); return; }
+  // 부모 노드에서 v-card/empty들만 교체
+  const parent = container.parentElement;
+  if(!parent) { renderSurvey(); return; }
+  const r = regions.find(x=>x.id===svRegionId); if(!r) return;
+  let list = cafes.filter(c=>c.regionId===svRegionId);
+  if(svFilter==='target') list = list.filter(c=>c.target);
+  else if(svFilter==='nonres') list = list.filter(c=>{ const o=occOf(c); return o!=null && o<=20; });
+  else if(svFilter==='todo') list = list.filter(c=>occOf(c)==null);
+  if(svCafeQuery.trim()){
+    const q = svCafeQuery.trim().toLowerCase();
+    list = list.filter(c=> (c.name||'').toLowerCase().includes(q) || (c.dong||'').toLowerCase().includes(q) || (c.brand||'').toLowerCase().includes(q) || (c.vendor||'').toLowerCase().includes(q));
+  }
+  // 위치 기반 정렬 (가까운 순)
+  if(myLat && myLng){
+    list.forEach(c=>{ c._dist = (c.lat&&c.lng) ? haversine(myLat,myLng,c.lat,c.lng) : 99999; });
+    list.sort((a,b)=> a._dist - b._dist);
+  } else {
+    list.sort((a,b)=> (occOf(b) ?? -1) - (occOf(a) ?? -1));
+  }
+  // 기존 카드들 제거
+  parent.querySelectorAll('.v-card, .empty').forEach(el=>el.remove());
+  // 새 카드 삽입
+  if(!list.length){
+    parent.insertAdjacentHTML('beforeend', '<div class="empty"><p>이 조건에 맞는 매장이 없어요.</p></div>');
+    return;
+  }
+  const cardsHTML = list.map(c=>{
+    const o = occOf(c);
+    const nonres = o!=null && o<=20 && !c.closed;
+    const statusCol = cafeStatusColor(c);
+    const vendorBadge = c.vendor && c.vendor!=='미확인'
+      ? `<span class="badge2 b-vendor2" style="background:${VENDOR_COLOR[c.vendor]||'#8A8F98'}">${esc(vendorTag(c.vendor))}</span>` : '';
+    const occBadge = c.closed ? '<span class="badge2" style="background:#2B2B2B;color:#fff;">폐업</span>'
+      : o!=null ? `<span class="badge2" style="background:${o>=80?'#FAE8E4':o>=60?'var(--sv-target-bg)':'var(--sv-warn-bg)'};color:${statusCol};">점유율 ${o}%${o>=80?' 🔴':''}</span>` : '';
+    const distLabel = (myLat && c._dist!=null && c._dist<99999) ? `<span style="font-size:11px;color:var(--sub);margin-left:6px;">📍 ${c._dist<1000?Math.round(c._dist)+'m':(c._dist/1000).toFixed(1)+'km'}</span>` : '';
+    return `<div class="v-card" style="border-left:4px solid ${statusCol};${c.closed?'opacity:.6;':''}" onclick="editCafe('${c.id}')">
+      <div class="v-name">${c.target?'<span class="star">⭐</span>':''}${esc(c.name)}${distLabel}${c.closed?' <span style="font-size:12px;color:#2B2B2B;font-weight:700;">(폐업)</span>':''}</div>
+      <div class="v-sub">${esc(c.dong||'')}${c.brand?` · ${esc(c.brand)}`:''}${c.lockerDate?` · 조사 ${esc(c.lockerDate)}`:''}</div>
+      ${o!=null&&!c.closed?`<div class="occ-row"><b style="color:${statusCol}">${o}%</b><span>사물함 ${esc(c.lockerUsed)}/${esc(c.lockerTotal)}</span></div>`:''}
+      <div class="v-badges">${occBadge}${nonres?'<span class="badge2 b-nr">🏠 비상주 추천</span>':''}${c.target?'<span class="badge2 b-occ-hi">⭐ 고스카 전환</span>':''}${vendorBadge}</div>
+    </div>`;
+  }).join('');
+  parent.insertAdjacentHTML('beforeend', cardsHTML);
 }
 function setSvFilter(f){ svFilter=f; renderSurvey(); }
 let svMapOpen = false;
@@ -2685,9 +2777,15 @@ function drawSurveyMap(){
     const o = occOf(c);
     return { lat:c.lat, lng:c.lng, label:`${shortName(c.name)}${c.closed?' 폐업':o!=null?` ${o}%`:''}`,
              color: cafeStatusColor(c),
+             cafeId: c.id,
              sub:`${c.name} · ${c.brand||''} · ${c.closed?'폐업':`사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}`}${c.vendor&&c.vendor!=='미확인'?` · ${c.vendor}`:''}` };
   });
-  renderMap('svMap', pins);
+  // 내 위치 핀
+  if(myLat && myLng){
+    pins.unshift({ lat:myLat, lng:myLng, label:'📍 내 위치', color:'#3D5A9E', sub:'현재 위치', isMe:true });
+  }
+  const center = (myLat && myLng) ? { lat:myLat, lng:myLng } : null;
+  renderMap('svMap', pins, center);
 }
 function openRegion(id){ svRegionId=id; svFilter='all'; renderSurvey(); window.scrollTo(0,0); }
 function closeRegion(){ svRegionId=null; renderSurvey(); }
