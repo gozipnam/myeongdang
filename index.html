@@ -1711,6 +1711,52 @@ async function autoResearch(){
   }
 }
 /* ---------- 수익성 시뮬레이션 ---------- */
+/* 경쟁업체 통합 목록
+   ① 현장·AI 로 기록한 competitors  ② 반경 500m 안의 조사 DB 매장
+   두 곳에 같은 매장이 있으면 한 줄로 합칩니다. */
+function competitorRows(s){
+  const key = n => (n||'').replace(/\s/g,'').toLowerCase();
+  const rows = new Map();
+
+  (s.competitors||[]).forEach(cp=>{
+    if(!cp || !cp.name) return;
+    rows.set(key(cp.name), {
+      name: cp.name, memo: cp.memo||'', open: cp.open||'',
+      occ: cp.locker ?? null, used: cp.lockerUsed ?? null, total: cp.lockerTotal ?? null,
+      p1h: cp.p1h ?? null, p100: cp.p100 ?? null, p4w: cp.p4w ?? null,
+      dist: null, closed: false
+    });
+  });
+
+  if(s.lat && s.lng){
+    cafes.forEach(c=>{
+      if(!c || !c.lat || !c.lng) return;
+      const d = haversine(s.lat, s.lng, c.lat, c.lng);
+      if(d > 500) return;
+      const k = key(c.name), o = occOf(c), ex = rows.get(k);
+      if(ex){
+        ex.dist = (ex.dist == null) ? d : Math.min(ex.dist, d);
+        if(ex.occ == null && o != null){ ex.occ = o; ex.used = c.lockerUsed; ex.total = c.lockerTotal; }
+        ex.closed = ex.closed || !!c.closed;
+      }else{
+        rows.set(k, {
+          name: c.name, memo: '', open: '',
+          occ: o, used: c.lockerUsed ?? null, total: c.lockerTotal ?? null,
+          p1h: null, p100: null, p4w: null,
+          dist: d, closed: !!c.closed
+        });
+      }
+    });
+  }
+
+  // 점유율 높은 순 → 같은 값이면 가까운 순
+  return [...rows.values()].sort((a,b)=>{
+    const ao = a.occ ?? -1, bo = b.occ ?? -1;
+    if(bo !== ao) return bo - ao;
+    return (a.dist ?? 99999) - (b.dist ?? 99999);
+  });
+}
+
 function calcSim(s, fixed){
   const m = s.sim || {};
   // 좌석 수 미입력 시 평당 1.3석 자동 계산 (자사 기준)
@@ -2566,38 +2612,39 @@ function reportParts(s,c,forPdf){
     <p style="color:var(--sub);font-size:12.5px;margin-top:5px;">엘리베이터 ${s.elev==='y'?'있음':'없음'} · 주차 ${s.park==='y'?'가능':'불가'} · 24시간 운영 ${s.h24==='y'?'가능':s.h24==='n'?'불가':'미확인'}</p>
 
     <div class="rp-sec">4. 경쟁업체 동향 (점유율 높은 순)</div>
-    ${(s.competitors||[]).length ? `<table class="mini">
-      <tr><th>업체명</th><th>오픈</th><th style="text-align:right;">사물함 (이용/총)</th><th style="text-align:right;">1h / 100h / 4주</th></tr>
-      ${[...s.competitors].sort((a,b)=>(b.locker??-1)-(a.locker??-1)).map(cp=>{
-        const p = v => v!=null ? (v>=10000 ? (v/10000)+'만' : v.toLocaleString()+'원') : '—';
-        const lockerCell = cp.locker!=null
-          ? `${cp.locker}%${cp.lockerUsed!=null&&cp.lockerTotal!=null?` (${cp.lockerUsed}/${cp.lockerTotal})`:''}`
-          : '—';
-        return `<tr><td>${esc(cp.name)}${cp.memo?`<div style="font-size:11.5px;color:var(--sub);">${esc(cp.memo)}</div>`:''}</td><td>${esc(cp.open)||'—'}</td><td class="num">${lockerCell}</td><td class="num" style="font-size:12px;">${p(cp.p1h)} / ${p(cp.p100)} / ${p(cp.p4w)}</td></tr>`;
-      }).join('')}
-    </table>` : '<p style="color:var(--sub);">기록된 경쟁업체 없음</p>'}
     ${(()=>{
-      // 반경 500m 조사 DB 매장 (거리·같은 건물 표기)
-      if(!s.lat || !s.lng) return '';
-      const manualNames = new Set((s.competitors||[]).map(cp=>(cp.name||'').replace(/\s/g,'')));
-      const near = cafes
-        .filter(c=>c.lat && c.lng && !manualNames.has((c.name||'').replace(/\s/g,'')))
-        .map(c=>({ c, d: haversine(s.lat, s.lng, c.lat, c.lng) }))
-        .filter(x=>x.d <= 500)
-        .sort((a,b)=>{ const oa=occOf(a.c)??-1, ob=occOf(b.c)??-1; return ob-oa; });
-      if(!near.length) return '';
-      return `<div style="font-size:12.5px;font-weight:700;margin:12px 0 6px;">반경 500m 조사 기록 (${near.length}곳)</div>
-      <table class="mini">
-        <tr><th>업체명</th><th style="text-align:right;">거리</th><th style="text-align:right;">사물함 점유율</th></tr>
-        ${near.map(({c,d})=>{
-          const o = occOf(c);
-          const dl = distLabel(d);
-          const emph = dl.level==='same' || dl.level==='adjacent';
-          return `<tr><td>${esc(c.name)}${c.closed?' <span style="color:#CE4A36;font-size:11px;">폐업</span>':''}</td>
-            <td class="num"${emph?' style="color:#CE4A36;font-weight:700;"':''}>${dl.text}</td>
-            <td class="num">${o!=null?`${o}%${c.lockerUsed&&c.lockerTotal?` (${c.lockerUsed}/${c.lockerTotal})`:''}`:'미확인'}</td></tr>`;
+      const rows = competitorRows(s);
+      if(!rows.length) return '<p style="color:var(--sub);">기록된 경쟁업체 없음</p>';
+      // 값이 하나도 없는 열은 아예 만들지 않습니다 (— 만 늘어서는 표를 막습니다)
+      const hasDist  = rows.some(r=>r.dist != null);
+      const hasOpen  = rows.some(r=>r.open);
+      const hasPrice = rows.some(r=>r.p1h != null || r.p100 != null || r.p4w != null);
+      const p = v => v!=null ? (v>=10000 ? (v/10000)+'만' : v.toLocaleString()+'원') : '—';
+      const surveyed = rows.filter(r=>r.occ != null).length;
+      return `<table class="mini">
+        <tr><th>업체명</th>
+          ${hasDist  ? '<th style="text-align:right;">거리</th>' : ''}
+          <th style="text-align:right;">사물함 점유율</th>
+          ${hasOpen  ? '<th>오픈</th>' : ''}
+          ${hasPrice ? '<th style="text-align:right;">1h / 100h / 4주</th>' : ''}
+        </tr>
+        ${rows.map(r=>{
+          const dl = r.dist != null ? distLabel(r.dist) : null;
+          const emph = dl && (dl.level==='same' || dl.level==='adjacent');
+          const occCell = r.occ != null
+            ? `${r.occ}%${(r.used!=null && r.total) ? ` (${r.used}/${r.total})` : ''}`
+            : '<span style="color:var(--sub);">미조사</span>';
+          return `<tr>
+            <td>${esc(r.name)}${r.closed?' <span style="color:#CE4A36;font-size:11px;">폐업</span>':''}
+              ${r.memo?`<div style="font-size:11.5px;color:var(--sub);">${esc(r.memo)}</div>`:''}</td>
+            ${hasDist ? `<td class="num"${emph?' style="color:#CE4A36;font-weight:700;"':''}>${dl?dl.text:'—'}</td>` : ''}
+            <td class="num">${occCell}</td>
+            ${hasOpen  ? `<td>${esc(r.open)||'—'}</td>` : ''}
+            ${hasPrice ? `<td class="num" style="font-size:12px;">${p(r.p1h)} / ${p(r.p100)} / ${p(r.p4w)}</td>` : ''}
+          </tr>`;
         }).join('')}
-      </table>`;
+      </table>
+      <p style="color:var(--sub);font-size:11.5px;margin-top:4px;">총 ${rows.length}곳 · 점유율 확인 ${surveyed}곳${hasDist?' · 거리는 반경 500m 조사 기록 기준':''}</p>`;
     })()}
   `;
 
@@ -2772,14 +2819,19 @@ function reportText(s,c){
   lines.push(`3. 건물 (${c.bldScore}/100)`);
   lines.push('- ' + BLD_ITEMS.map(it=>`${it.label.split(' (')[0]} ${bldValLabel(it,b[it.key])}`).join(' / '));
   lines.push(`- 엘리베이터 ${s.elev==='y'?'O':'X'} / 주차 ${s.park==='y'?'O':'X'} / 24시간 ${s.h24==='y'?'가능':s.h24==='n'?'불가':'미확인'}`);
-  if((s.competitors||[]).length){
+  const cmpRows = competitorRows(s);
+  if(cmpRows.length){
     lines.push(``);
-    lines.push(`4. 경쟁업체 동향`);
-    [...s.competitors].sort((a,b)=>(b.locker??-1)-(a.locker??-1)).forEach(cp=>{
+    lines.push(`4. 경쟁업체 동향 (${cmpRows.length}곳)`);
+    cmpRows.forEach(r=>{
       const p = v => v!=null ? (v>=10000 ? (v/10000)+'만' : v.toLocaleString()+'원') : '?';
-      const lk = cp.locker!=null ? `${cp.locker}%${cp.lockerUsed!=null&&cp.lockerTotal!=null?` (${cp.lockerUsed}/${cp.lockerTotal})`:''}` : '?';
-      const price = (cp.p1h!=null||cp.p100!=null||cp.p4w!=null) ? ` | 1h ${p(cp.p1h)} · 100h ${p(cp.p100)} · 4주 ${p(cp.p4w)}` : '';
-      lines.push(`- ${cp.name} | 오픈 ${cp.open||'?'} | 사물함 ${lk}${price}${cp.memo?` | ${cp.memo}`:''}`);
+      const parts = [r.name + (r.closed?' (폐업)':'')];
+      if(r.dist != null) parts.push(distLabel(r.dist).text);
+      parts.push(r.occ != null ? `사물함 ${r.occ}%${(r.used!=null&&r.total)?` (${r.used}/${r.total})`:''}` : '사물함 미조사');
+      if(r.open) parts.push(`오픈 ${r.open}`);
+      if(r.p1h!=null||r.p100!=null||r.p4w!=null) parts.push(`1h ${p(r.p1h)} · 100h ${p(r.p100)} · 4주 ${p(r.p4w)}`);
+      if(r.memo) parts.push(r.memo);
+      lines.push(`- ${parts.join(' | ')}`);
     });
   }
   const sim = calcSim(s,c.fixed);
