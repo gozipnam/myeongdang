@@ -1460,7 +1460,7 @@ function repairAndParse(raw){
    AI_PROXY_PASS 에 Cloudflare 의 APP_PASS 와 같은 값을 넣어 주세요.
    ═══════════════════════════════════════════════════════════ */
 const AI_PROXY_URL  = 'https://myeongdang-ai.yjyu.workers.dev';
-const AI_PROXY_PASS = '';   // ← 여기에 APP_PASS 값을 넣으세요
+const AI_PROXY_PASS = 'mdang2026';   // ← 여기에 APP_PASS 값을 넣으세요
 
 /* 자동 조사가 가능한 환경인지 확인합니다. */
 function aiAvailable(){ return IS_CLAUDE || !!AI_PROXY_URL; }
@@ -3474,8 +3474,19 @@ function cafeFormHTML(c){
     <div class="grid2" style="margin-top:8px;">
       <div class="field"><label>동/지역</label><input id="cf_dong" class="inline-input" value="${esc(c?.dong||'')}" placeholder="예: 죽전동" oninput="checkDupHint()"></div>
       <div class="field"><label>브랜드</label><input id="cf_brand" class="inline-input" value="${esc(c?.brand||'')}" placeholder="예: 멘토즈" oninput="checkDupHint()"></div>
-      <div class="field"><label>사물함 이용 수</label><input id="cf_lu" class="inline-input" type="number" value="${esc(c?.lockerUsed??'')}"></div>
-      <div class="field"><label>사물함 총 개수</label><input id="cf_lt" class="inline-input" type="number" value="${esc(c?.lockerTotal??'')}"></div>
+      <div class="field"><label>사물함 이용 수</label><input id="cf_lu" class="inline-input" type="number" value="${esc(c?.lockerUsed??'')}" oninput="markSurveyedToday()"></div>
+      <div class="field"><label>사물함 총 개수</label><input id="cf_lt" class="inline-input" type="number" value="${esc(c?.lockerTotal??'')}" oninput="markSurveyedToday()"></div>
+      <div class="field" style="grid-column:1/-1;">
+        <label>조사일</label>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;">
+          <span style="color:var(--sub);">${c?.lockerDate ? esc(c.lockerDate) : '기록 없음'}</span>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+            <input type="checkbox" id="cf_dateToday" ${c?.lockerDate?'':'checked'} style="width:16px;height:16px;">
+            <span>오늘(${new Date().toISOString().slice(0,10)})로 갱신</span>
+          </label>
+        </div>
+        <div style="font-size:11.5px;color:var(--sub);margin-top:4px;">사물함 수를 입력하면 자동으로 체크됩니다. 값이 지난번과 같아도 조사일은 오늘로 기록됩니다.</div>
+      </div>
       <div class="field"><label>키오스크 벤더</label><select id="cf_vendor" class="inline-input">${VENDORS.map(x=>`<option ${c?.vendor===x?'selected':''}>${x}</option>`).join('')}</select></div>
       <div class="field" style="grid-column:1/-1;"><label>상태</label><div class="cf-toggles"><input type="checkbox" id="cf_target" ${c?.target?'checked':''}><label for="cf_target" class="cf-toggle cf-t"> 전환 타깃</label><input type="checkbox" id="cf_closed" ${c?.closed?'checked':''}><label for="cf_closed" class="cf-toggle cf-c"> 폐업</label></div></div>
     </div>
@@ -3946,6 +3957,12 @@ function checkDupHint(){
 }
 let cafeDupConfirmed = false;
 
+/* 사물함 칸을 입력하면 "오늘 조사"로 자동 표시합니다. */
+function markSurveyedToday(){
+  const cb = document.getElementById('cf_dateToday');
+  if(cb) cb.checked = true;
+}
+
 function addCafe(){ cafeEditId=null; openCafeModal(null); }
 function editCafe(id){ cafeEditId=id; openCafeModal(cafes.find(c=>c.id===id)); }
 function openCafeModal(c){
@@ -3982,6 +3999,15 @@ async function saveCafe(){
   const id = cafeEditId || ('c' + Date.now());
   const addr = g('cf_addr').trim();
   const lockerChanged = prev ? (prev.lockerUsed!=lu || prev.lockerTotal!=lt) : (lu!==''||lt!=='');
+  // 조사일 결정
+  //  - 사물함 값이 아예 없으면 조사일도 비웁니다 (미조사 상태 유지)
+  //  - "오늘로 갱신"이 켜져 있으면 값이 지난번과 같아도 오늘로 기록합니다
+  const markToday = document.getElementById('cf_dateToday')?.checked;
+  const todayStr = new Date().toISOString().slice(0,10);
+  let lockerDateVal = prev?.lockerDate || '';
+  if(lu === '' && lt === '') lockerDateVal = '';
+  else if(markToday || lockerChanged) lockerDateVal = todayStr;
+  else if(!lockerDateVal) lockerDateVal = todayStr;
   // 주소가 새로 입력·변경되면 좌표 자동 변환
   let lat = prev?.lat ?? null, lng = prev?.lng ?? null;
   if(addr && (!prev || prev.addr !== addr || !prev.lat)){
@@ -3997,7 +4023,7 @@ async function saveCafe(){
     target: document.getElementById('cf_target').checked,
     closed: document.getElementById('cf_closed').checked,
     nonres: prev?.nonres||false,
-    lockerDate: lockerChanged ? new Date().toISOString().slice(0,10) : (prev?.lockerDate||''),
+    lockerDate: lockerDateVal,
     memo: g('cf_memo').trim(),
     updatedBy: (fbUser&&fbUser.email)||'', updatedAt: Date.now()
   };
