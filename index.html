@@ -455,7 +455,7 @@
     <div style="display:flex;gap:8px;margin-top:14px;">
       <button class="btn btn-danger btn-sm cm-del" onclick="deleteCafe()">삭제</button>
       <button class="btn btn-ghost btn-sm" style="margin-left:auto;" onclick="closeCafeModal()">취소</button>
-      <button class="btn btn-primary btn-sm" onclick="saveCafe()">저장</button>
+      <button class="btn btn-primary btn-sm cm-save" onclick="saveCafe()">저장</button>
     </div>
   </div>
 </div>
@@ -1455,13 +1455,66 @@ function repairAndParse(raw){
   return null;
 }
 
+/* ═══════════════════════════════════════════════════════════
+   심부름꾼(프록시) 서버 설정 — 아래 두 줄만 채우면 됩니다.
+   Cloudflare Worker 를 만든 뒤 발급된 주소를 넣어 주세요.
+   비워두면 클로드 아티팩트 안에서만 자동 조사가 작동합니다.
+   ═══════════════════════════════════════════════════════════ */
+const AI_PROXY_URL  = '';   // 예: 'https://myeongdang-ai.abcd1234.workers.dev'
+const AI_PROXY_PASS = '';   // Worker 에 설정한 APP_PASS 와 같은 값
+
+/* 자동 조사가 가능한 환경인지 확인합니다. */
+function aiAvailable(){ return IS_CLAUDE || !!AI_PROXY_URL; }
+
+/* ---------- 공용: 클로드에게 직접 물어보기 ----------
+   아티팩트 안이면 클로드에 직접, 브라우저면 심부름꾼 서버를 거칩니다. */
+async function askClaude(prompt, opts){
+  const o = opts || {};
+  const viaProxy = !IS_CLAUDE && !!AI_PROXY_URL;
+  const headers = { "Content-Type": "application/json" };
+  if(viaProxy && AI_PROXY_PASS) headers["X-App-Pass"] = AI_PROXY_PASS;
+  const res = await fetch(viaProxy ? AI_PROXY_URL : "https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1000,
+      messages: [{ role: "user", content: prompt }],
+      tools: o.search === false ? undefined : [{ "type": "web_search_20250305", "name": "web_search" }]
+    })
+  });
+  if(!res.ok){
+    if(res.status === 401 || res.status === 403) throw new Error('auth');
+    if(res.status === 429) throw new Error('http 429');
+    throw new Error('http ' + res.status);
+  }
+  const data = await res.json();
+  return (data.content || []).filter(i => i.type === 'text').map(i => i.text).join('\n');
+}
+/* 응답 텍스트에서 JSON 객체({...})를 꺼냅니다. */
+function extractObject(text){
+  const clean = String(text || '').replace(/```json|```/g, '').trim();
+  const start = clean.indexOf('{');
+  if(start < 0) return null;
+  return repairAndParse(clean.slice(start));
+}
+/* 실패 사유를 사람이 읽을 수 있는 문장으로 바꿔 줍니다. */
+function claudeErrMsg(e){
+  const m = (e && e.message) || '';
+  if(m === 'auth') return AI_PROXY_URL
+    ? '심부름꾼 서버 인증에 실패했어요. 접속 암호를 확인해 주세요.'
+    : '자동 조사를 쓸 수 없는 환경이에요. 아래 「직접 입력」으로 진행해 주세요.';
+  if(m === 'http 429') return '요청이 몰렸어요. 30초쯤 뒤에 다시 눌러 주세요.';
+  if(m.indexOf('http') === 0) return '조사 서버 응답이 없었어요. 잠시 후 다시 시도해 주세요.';
+  return '결과를 읽지 못했어요. 다시 시도해 주세요.';
+}
+
 async function autoResearch(){
   const addr = document.getElementById('f_addr').value.trim();
   const box = document.getElementById('researchResult');
   const btn = document.getElementById('researchBtn');
-  const apiHeaders = { "Content-Type": "application/json" };
-  if(!IS_CLAUDE){
-    // 브라우저 버전: 조사 요청 문구를 복사해 주고 클로드를 새 탭으로 연다 (무료)
+  if(!aiAvailable()){
+    // 자동 조사 불가 환경: 조사 요청 문구를 복사해 주고 클로드를 새 탭으로 연다 (무료)
     if(!addr){
       notify('기본 정보의 "주소"를 먼저 입력해 주세요.');
       document.getElementById('f_addr').focus();
@@ -1520,26 +1573,7 @@ async function autoResearch(){
 {"highschools":["학교명"],"middleschools":["학교명"],"academy_count":숫자또는null,"studycafes":[{"name":"업체명","info":"한 줄"}],"anding":{"found":true또는false,"name":"지점명 또는 null","approx_distance_m":숫자또는null},"signals":[{"type":"warn 또는 good","text":"신호 한 문장(존댓말)"}],"pop_teen":숫자또는null,"pop_20s":숫자또는null,"apt_units":숫자또는null,"universities":["대학명"],"nearest_transit":"역/정류장명 도보 O분","transit_walk_min":숫자또는null,"transit_distance_m":숫자또는null,"flow_position":"high|mid|low 또는 null","confidence":"high|medium|low","note":"조사 요약 한 문장(존댓말)"}`;
 
   try{
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: apiHeaders,
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [{ role: "user", content: prompt }],
-        tools: [{ "type": "web_search_20250305", "name": "web_search" }]
-      })
-    });
-    if(!response.ok){
-      if(response.status === 401 || response.status === 403) throw new Error('auth');
-      throw new Error('http ' + response.status);
-    }
-    const data = await response.json();
-    const text = (data.content || []).filter(i=>i.type==='text').map(i=>i.text).join('\n');
-    const clean = text.replace(/```json|```/g,'').trim();
-    const jsonStart = clean.indexOf('{');
-    if(jsonStart < 0) throw new Error('no json');
-    const r = repairAndParse(clean.slice(jsonStart));
+    const r = extractObject(await askClaude(prompt));
     if(!r) throw new Error('parse fail');
 
     const hs = Array.isArray(r.highschools) ? r.highschools : [];
@@ -1641,10 +1675,9 @@ function simResultHTML(s,c){
   <div style="font-size:11.5px;color:var(--sub);margin-top:4px;">인건비·전기 증가분 등 변동비는 제외된 단순 계산입니다. 보수적으로 점유율을 낮춰서도 확인해 보세요.</div>`;
 }
 /* ---------- 상권 지표 전용 자동 조사 (인구·세대·학원) ---------- */
-function startLocEvalResearch(id){
-  const s = sites.find(x=>x.id===id); if(!s) return;
-  if(!s.addr){ notify('먼저 후보지 주소를 입력해 주세요.'); return; }
-  const prompt = `한국 상권분석 도우미로서 아래 후보지의 "상권 지표"를 웹 검색으로 조사해 주세요.
+/* 상권 지표 조사 프롬프트 (자동·수동 공용) */
+function locEvalPrompt(s){
+  return `한국 상권분석 도우미로서 아래 후보지의 "상권 지표"를 웹 검색으로 조사해 주세요.
 주소: ${s.addr}
 
 조사 항목 (가능한 한 모두 숫자로):
@@ -1663,7 +1696,43 @@ function startLocEvalResearch(id){
 - 아래 JSON만 출력해 주세요. 마크다운 백틱이나 설명문은 넣지 마세요.
 
 {"pop_teen":숫자또는null,"pop_20s":숫자또는null,"apt_units":숫자또는null,"apt_note":"단지명 세대수 근거 한 줄","academy_cnt":숫자또는null,"highschool_cnt":숫자또는null,"univ_cnt":숫자또는null,"confidence":"high|medium|low","note":"조사 요약 한 문장(존댓말)"}`;
+}
+async function startLocEvalResearch(id){
+  const s = sites.find(x=>x.id===id); if(!s) return;
+  if(!s.addr){ notify('먼저 후보지 주소를 입력해 주세요.'); return; }
+  const prompt = locEvalPrompt(s);
 
+  const box = document.getElementById('locEvalResearch-' + id);
+  box.style.display = 'block';
+
+  /* ── 자동 조사 가능: 복사·붙여넣기 없이 바로 조사 ── */
+  if(aiAvailable()){
+    box.innerHTML = `
+      <div id="leStatus-${id}" style="font-size:12.5px;line-height:1.6;">
+        🔍 <b>"${esc(s.addr)}"</b> 상권 지표를 조사하고 있어요… <span style="color:var(--sub);">(20~40초)</span>
+      </div>`;
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
+    const st = document.getElementById('leStatus-' + id);
+    try{
+      const r = extractObject(await askClaude(prompt));
+      if(!r) throw new Error('parse fail');
+      await applyLocEvalData(id, r, st);
+    }catch(e){
+      st.innerHTML = `⚠️ ${esc(claudeErrMsg(e))}<br>
+        <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="startLocEvalResearch('${id}')">다시 조사</button>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="startLocEvalResearchManual('${id}')">직접 입력으로 전환</button>`;
+    }
+    return;
+  }
+
+  /* ── 브라우저(깃허브): 기존 복사·붙여넣기 방식 유지 ── */
+  startLocEvalResearchManual(id, prompt);
+}
+
+/* 복사·붙여넣기 방식 (브라우저 폴백 + 자동 조사 실패 시 대안) */
+function startLocEvalResearchManual(id, presetPrompt){
+  const s = sites.find(x=>x.id===id); if(!s) return;
+  const prompt = presetPrompt || locEvalPrompt(s);
   const box = document.getElementById('locEvalResearch-' + id);
   box.style.display = 'block';
   box.innerHTML = `
@@ -1697,7 +1766,12 @@ async function applyLocEvalResearch(id){
     if(a >= 0 && b > a) t = t.slice(a, b+1);
     r = JSON.parse(t);
   }catch(e){ st.textContent = 'JSON 형식을 인식할 수 없어요. 클로드 응답을 그대로 붙여넣어 주세요.'; return; }
+  await applyLocEvalData(id, r, st);
+}
 
+/* 조사 결과(JSON 객체)를 후보지에 반영합니다. 자동·수동 양쪽에서 씁니다. */
+async function applyLocEvalData(id, r, st){
+  const s = sites.find(x=>x.id===id); if(!s) return;
   const keys = ['pop_teen','pop_20s','apt_units','academy_cnt','highschool_cnt','univ_cnt'];
   if(!s.locEval) s.locEval = {};
   const applied = [];
@@ -1708,14 +1782,22 @@ async function applyLocEvalResearch(id){
   });
   if(r.apt_note){ s.locEval.apt_note = String(r.apt_note).slice(0,200); }
 
-  if(!applied.length){ st.textContent = '적용할 숫자가 없어요. 응답에 pop_teen 등 숫자 값이 있는지 확인해 주세요.'; return; }
+  if(!applied.length){
+    if(st) st.innerHTML = `적용할 숫자가 없어요. <button class="btn btn-ghost btn-sm" onclick="startLocEvalResearch('${id}')">다시 조사</button>`;
+    return;
+  }
 
   try{
     await db.collection('sites').doc(id).update({ locEval: s.locEval });
-    st.innerHTML = `<b style="color:var(--green)">✅ ${applied.length}개 항목 적용</b>${r.confidence?` · 신뢰도 ${esc(r.confidence)}`:''}${r.note?`<br><span style="color:var(--sub)">${esc(r.note)}</span>`:''}`;
+    if(st) st.innerHTML = `<b style="color:var(--green)">✅ ${applied.length}개 항목 적용</b>${r.confidence?` · 신뢰도 ${esc(r.confidence)}`:''}${r.note?`<br><span style="color:var(--sub)">${esc(r.note)}</span>`:''}
+      <div style="margin-top:8px;">
+        <button class="btn btn-ghost btn-sm" onclick="startLocEvalResearch('${id}')">다시 조사</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('locEvalResearch-${id}').style.display='none'">닫기</button>
+      </div>
+      <div style="font-size:11.5px;color:var(--sub);margin-top:6px;">웹검색 기반 추정치입니다. 현장 확인 후 값을 직접 고쳐도 됩니다.</div>`;
     notify('상권 지표를 반영했어요.');
     render();
-  }catch(e){ st.textContent = '저장 실패: ' + (e.message||''); }
+  }catch(e){ if(st) st.textContent = '저장 실패: ' + (e.message||''); }
 }
 
 /* ---------- 상권·입지 평가 저장 ---------- */
@@ -1751,9 +1833,13 @@ async function copyText(text, okMsg){
   }
 }
 function exportData(){
-  if(!sites.length){ notify('백업할 후보지가 없어요.'); return; }
-  const payload = JSON.stringify({ app:'studycafe-analyzer', version:2, exported: new Date().toISOString(), sites }, null, 0);
-  copyText(payload, `후보지 ${sites.length}곳 백업 완료 — 메모장·카톡(나에게 보내기)에 붙여넣어 보관하세요. (사진 제외)`);
+  if(!sites.length && !cafes.length){ notify('백업할 데이터가 없어요.'); return; }
+  const slim = cafes.map(c=>({id:c.id, regionId:c.regionId, name:c.name, dong:c.dong, brand:c.brand,
+    lockerUsed:c.lockerUsed||'', lockerTotal:c.lockerTotal||'', vendor:c.vendor||'미확인',
+    target:!!c.target, nonres:!!c.nonres, closed:!!c.closed, memo:c.memo||'', lockerDate:c.lockerDate||''}));
+  const payload = JSON.stringify({ app:'studycafe-analyzer', version:3,
+    exported: new Date().toISOString(), sites, regions, cafes: slim }, null, 0);
+  copyText(payload, `후보지 ${sites.length}곳 · 매장 ${slim.length}곳 백업 완료 — 메모장·카톡(나에게 보내기)에 붙여넣어 보관하세요. (사진 제외)`);
 }
 function toggleRestore(){
   document.getElementById('restorePanel').classList.toggle('open');
@@ -1769,10 +1855,22 @@ async function applyRestore(){
     sites.forEach(s => { if(!s.id) s.id = 's' + Date.now() + Math.random().toString(36).slice(2,6); });
     normalizeSites();
     await persist();
+
+    // 매장(점유율)·지역이 함께 담긴 백업이면 병합 복원 — 기존 매장은 지우지 않습니다.
+    let nCafe = 0;
+    if(db && fbUser && !IS_CLAUDE){
+      const ops = [];
+      (Array.isArray(parsed.regions) ? parsed.regions : []).filter(r=>r&&r.id)
+        .forEach(r => ops.push(b => b.set(db.collection('regions').doc(r.id), r, { merge:true })));
+      (Array.isArray(parsed.cafes) ? parsed.cafes : []).filter(c=>c&&c.id)
+        .forEach(c => { nCafe++; ops.push(b => b.set(db.collection('cafes').doc(c.id), c, { merge:true })); });
+      if(ops.length) await commitInChunks(ops);
+    }
+
     document.getElementById('restoreText').value = '';
     document.getElementById('restorePanel').classList.remove('open');
     render();
-    notify(`후보지 ${sites.length}곳을 복원했어요.`);
+    notify(`복원 완료 — 후보지 ${sites.length}곳${nCafe?` · 매장 ${nCafe}곳`:''}`);
   }catch(e){
     notify('복원 실패 — 백업 텍스트 형식이 올바르지 않아요.');
   }
@@ -3333,7 +3431,8 @@ async function addRegion(){
 /* ---- 매장 CRUD (prompt 기반 간단 입력 폼) ---- */
 function cafeFormHTML(c){
   return `<div style="text-align:left;">
-    <div class="field"><label>매장명 *</label><input id="cf_name" class="inline-input" value="${esc(c?.name||'')}"></div>
+    <div class="field"><label>매장명 *</label><input id="cf_name" class="inline-input" value="${esc(c?.name||'')}" oninput="checkDupHint()" autocomplete="off"></div>
+    <div id="cf_dupHint" style="display:none;margin-top:6px;"></div>
     <div class="grid2" style="margin-top:8px;">
       <div class="field"><label>동/지역</label><input id="cf_dong" class="inline-input" value="${esc(c?.dong||'')}" placeholder="예: 죽전동"></div>
       <div class="field"><label>브랜드</label><input id="cf_brand" class="inline-input" value="${esc(c?.brand||'')}" placeholder="예: 멘토즈"></div>
@@ -3373,6 +3472,18 @@ function startAutoSearch(){
   const guide = document.getElementById('svSearchGuide');
   const paste = document.getElementById('svSearchPaste');
   box.style.display = 'block';
+
+  /* ── 자동 조사 가능: 복사·붙여넣기 없이 바로 조사 ── */
+  if(aiAvailable()){
+    paste.style.display = 'none';
+    guide.innerHTML = `🔍 <b>"${esc(name)}"</b> 지역 스터디카페를 조사하고 있어요…
+      <span style="color:var(--sub);font-size:13px;">(20~40초)</span>`;
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
+    runAutoSearch(prompt, name);
+    return;
+  }
+
+  /* ── 브라우저(깃허브): 기존 복사·붙여넣기 방식 유지 ── */
   guide.innerHTML = `📋 <b>"${esc(name)}" 스터디카페 검색 요청이 복사됐어요.</b><br>
     <span style="color:var(--sub);font-size:13px;">클로드에 붙여넣고 → 응답 JSON을 복사 → 아래에 붙여넣기</span><br>
     <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="window.open('https://claude.ai/new','_blank')">🤖 클로드 열기</button>
@@ -3402,6 +3513,27 @@ function repairJSON(s){
   return null;
 }
 
+/* 아티팩트 전용: 클로드에게 직접 물어 결과를 바로 등록합니다.
+   응답 길이 제한으로 목록이 잘릴 수 있어, 다시 실행하면 누락분만 추가됩니다. */
+async function runAutoSearch(prompt, name){
+  const guide = document.getElementById('svSearchGuide');
+  const retry = `<button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="startAutoSearch()">🔄 이어서 더 조사</button>
+    <button class="btn btn-sm" style="margin-top:8px;" onclick="document.getElementById('svSearchPaste').style.display='block'">✍️ 직접 붙여넣기</button>`;
+  try{
+    const arr = repairJSON(await askClaude(prompt));
+    if(!arr || !Array.isArray(arr) || !arr.length) throw new Error('parse fail');
+    const res = await registerCafes(arr);
+    if(!res.ok){
+      guide.innerHTML = `⚠️ ${esc(res.msg)}<br>${retry}`;
+      return;
+    }
+    guide.innerHTML = `<b style="color:var(--green)">✅ ${res.added}곳 등록 완료</b>${res.dupes?` <span style="color:var(--sub);">(중복 ${res.dupes}곳 제외)</span>`:''}<br>
+      <span style="color:var(--sub);font-size:12.5px;">응답 길이 제한으로 일부가 빠졌을 수 있어요. 한 번 더 누르면 누락분만 추가됩니다.</span><br>${retry}`;
+  }catch(e){
+    guide.innerHTML = `⚠️ ${esc(claudeErrMsg(e))}<br>${retry}`;
+  }
+}
+
 async function parsePastedCafes(){
   const raw = document.getElementById('svPasteArea').value.trim();
   if(!raw){ notify('JSON을 붙여넣어 주세요.'); return; }
@@ -3410,9 +3542,16 @@ async function parsePastedCafes(){
     notify('JSON 형식을 인식할 수 없어요. 클로드 응답을 그대로 복사해서 붙여넣어 주세요.');
     return;
   }
+  const res = await registerCafes(arr);
+  notify(res.ok ? `${res.added}곳 등록 완료${res.dupes?` (중복 ${res.dupes}곳 제외)`:''}` : res.msg);
+  if(res.ok) document.getElementById('svAutoSearch').style.display = 'none';
+}
+
+/* 매장 배열을 현재 선택 지역에 등록합니다. 자동·수동 양쪽에서 씁니다. */
+async function registerCafes(arr){
   // 유효성 검사
   const valid = arr.filter(x => x && typeof x.name === 'string' && x.name.trim());
-  if(!valid.length){ notify('매장명(name)이 있는 항목이 없어요.'); return; }
+  if(!valid.length) return { ok:false, msg:'매장명(name)이 있는 항목이 없어요.' };
 
   // 기존 매장 이름과 중복 체크
   const existing = new Set(cafes.filter(c=>c.regionId===svRegionId).map(c=>(c.name||'').replace(/\s/g,'')));
@@ -3420,8 +3559,7 @@ async function parsePastedCafes(){
   const dupes = valid.length - newItems.length;
 
   if(!newItems.length){
-    notify(`${valid.length}곳 전부 이미 등록된 매장이에요.`);
-    return;
+    return { ok:false, msg:`${valid.length}곳 전부 이미 등록된 매장이에요.` };
   }
 
   // Firestore 배치 등록
@@ -3437,8 +3575,7 @@ async function parsePastedCafes(){
     });
   });
   await batch.commit();
-  document.getElementById('svAutoSearch').style.display = 'none';
-  notify(`${newItems.length}곳 등록 완료${dupes?` (중복 ${dupes}곳 제외)`:''}`);
+  return { ok:true, added:newItems.length, dupes };
 }
 
 /* ---------- 네이버 책갈피 가져오기 ---------- */
@@ -3637,6 +3774,97 @@ async function runNaverImport(apply){
   notify(`네이버 책갈피 ${done}건을 등록했어요.`);
 }
 
+/* ═══════════════════════════════════════════════════════════
+   매장명 중복 확인
+   같은 브랜드의 다른 지점(르하임 A점 / 르하임 B점)은 정상이므로
+   막지 않고 "확인 바랍니다" 안내만 띄웁니다.
+   ═══════════════════════════════════════════════════════════ */
+
+/* 매장명에서 업종 표현과 공백을 걷어내 비교용 문자열을 만듭니다. */
+function cafeKey(s){
+  return String(s || '')
+    .replace(/\s+/g, '')
+    .replace(/스터디카페|스터디까페|스터디센터|스터디룸|독서실|스터디/g, '')
+    .replace(/[()\[\]\-_.·,]/g, '')
+    .toLowerCase();
+}
+/* 끝에 붙은 '점' 표기 차이를 없앱니다.
+   "르하임화성병점" 과 "르하임화성병점점" 을 같은 것으로 봅니다. */
+function cafeCore(s){
+  return cafeKey(s).replace(/점+$/, '');
+}
+/* 두 문자열이 앞에서 몇 글자까지 같은지 셉니다. */
+function commonPrefixLen(a, b){
+  let n = 0;
+  while(n < a.length && n < b.length && a[n] === b[n]) n++;
+  return n;
+}
+/* 지금 입력한 이름과 겹칠 만한 매장을 찾습니다.
+   kind: 'same'  = 이름이 사실상 같음 (같은 지점을 또 넣는 중)
+         'brand' = 같은 브랜드로 보임 (다른 지점일 수 있음) */
+function findDupCafes(name, excludeId){
+  const key = cafeKey(name);
+  const core = cafeCore(name);
+  if(key.length < 2) return [];
+  const brand = (document.getElementById('cf_brand')?.value || '').trim();
+  const bKey = cafeKey(brand);
+  const out = [];
+  cafes.forEach(c => {
+    if(!c || c.id === excludeId) return;
+    const cKey = cafeKey(c.name);
+    if(!cKey) return;
+    const sameRegion = c.regionId === svRegionId;
+    if(cKey === key || (core.length >= 2 && cafeCore(c.name) === core)){
+      out.push({ c, kind:'same', sameRegion });
+      return;
+    }
+    if(!sameRegion) return; // 브랜드 유사는 같은 지역 안에서만 봅니다
+    const byBrand = bKey.length >= 2 && cafeKey(c.brand) === bKey;
+    const byPrefix = commonPrefixLen(key, cKey) >= 2;
+    if(byBrand || byPrefix) out.push({ c, kind:'brand', sameRegion });
+  });
+  // 이름이 같은 건 앞으로, 그다음 이름순
+  return out.sort((a,b)=> (a.kind===b.kind ? 0 : a.kind==='same' ? -1 : 1)).slice(0, 6);
+}
+/* 매장명을 입력하는 동안 바로 안내를 띄웁니다. */
+function checkDupHint(){
+  const el = document.getElementById('cf_dupHint');
+  const input = document.getElementById('cf_name');
+  if(!el || !input) return;
+  cafeDupConfirmed = false;
+  const btn = document.querySelector('#cafeModal .cm-save');
+  if(btn) btn.textContent = '저장';
+
+  const hits = findDupCafes(input.value.trim(), cafeEditId);
+  if(!hits.length){ el.style.display = 'none'; el.innerHTML = ''; return; }
+
+  const hasSame = hits.some(h => h.kind === 'same');
+  const color = hasSame ? 'var(--red)' : 'var(--amber, #B8860B)';
+  const rows = hits.map(h => {
+    const c = h.c;
+    const occ = (c.lockerUsed !== '' && c.lockerTotal) ? ` · 점유율 ${Math.round(c.lockerUsed/c.lockerTotal*100)}%` : '';
+    const where = h.sameRegion ? (c.dong || '') : `다른 지역`;
+    return `<div style="font-size:12.5px;padding:3px 0;">
+      ${h.kind==='same'?'🔴':'🟡'} <b>${esc(c.name)}</b>
+      <span style="color:var(--sub);">${esc(where)}${esc(c.vendor && c.vendor!=='미확인' ? ' · '+c.vendor : '')}${occ}</span>
+    </div>`;
+  }).join('');
+
+  el.style.display = 'block';
+  el.innerHTML = `<div style="border:1px solid ${color};border-radius:8px;padding:10px;background:var(--card);">
+    <div style="font-size:13px;font-weight:600;color:${color};margin-bottom:6px;">
+      ⚠️ 이미 등록되어 진 지점으로 확인됩니다. 확인 바랍니다
+    </div>
+    ${rows}
+    <div style="font-size:11.5px;color:var(--sub);margin-top:6px;">
+      ${hasSame
+        ? '이름이 같은 매장이 있습니다. 같은 지점이라면 기존 매장을 수정해 주세요.'
+        : '같은 브랜드의 다른 지점이라면 그대로 저장하셔도 됩니다.'}
+    </div>
+  </div>`;
+}
+let cafeDupConfirmed = false;
+
 function addCafe(){ cafeEditId=null; openCafeModal(null); }
 function editCafe(id){ cafeEditId=id; openCafeModal(cafes.find(c=>c.id===id)); }
 function openCafeModal(c){
@@ -3644,13 +3872,30 @@ function openCafeModal(c){
   wrap.querySelector('.cm-title').textContent = c ? '매장 수정' : '매장 추가';
   wrap.querySelector('.cm-body').innerHTML = cafeFormHTML(c);
   wrap.querySelector('.cm-del').style.display = c ? 'inline-block' : 'none';
+  const sv = wrap.querySelector('.cm-save');
+  if(sv) sv.textContent = '저장';
+  cafeDupConfirmed = false;
   wrap.style.display = 'flex';
+  if(c) checkDupHint(); // 수정 화면에서도 겹치는 매장이 있으면 알려 줍니다
 }
 function closeCafeModal(){ document.getElementById('cafeModal').style.display='none'; cafeEditId=null; }
 async function saveCafe(){
   const g = id => { const el=document.getElementById(id); return el?el.value:''; };
   const name = g('cf_name').trim();
   if(!name){ notify('매장명을 입력해 주세요.'); return; }
+
+  // 중복 의심 매장이 있으면 한 번 더 확인받습니다.
+  const dups = findDupCafes(name, cafeEditId);
+  if(dups.length && !cafeDupConfirmed){
+    checkDupHint();
+    cafeDupConfirmed = true;
+    const btn = document.querySelector('#cafeModal .cm-save');
+    if(btn) btn.textContent = '확인했습니다 · 계속 저장';
+    document.getElementById('cf_dupHint')?.scrollIntoView({behavior:'smooth', block:'nearest'});
+    notify('이미 등록되어 진 지점으로 확인됩니다. 확인 바랍니다.');
+    return;
+  }
+
   const lu = g('cf_lu').replace(/[^0-9]/g,''), lt = g('cf_lt').replace(/[^0-9]/g,'');
   const prev = cafeEditId ? cafes.find(c=>c.id===cafeEditId) : null;
   const id = cafeEditId || ('c' + Date.now());
@@ -3769,7 +4014,8 @@ async function showBackupList(){
       </div>
       <div style="display:flex;gap:6px;">
         <button class="btn btn-ghost btn-sm" onclick="downloadBackup('${b.id}')">💾 다운로드</button>
-        <button class="btn btn-ghost btn-sm" onclick="restoreBackup('${b.id}')" style="color:var(--red);">복원</button>
+        <button class="btn btn-ghost btn-sm" onclick="restoreBackup('${b.id}','merge')">↩️ 점유율 되살리기</button>
+        <button class="btn btn-ghost btn-sm" onclick="restoreBackup('${b.id}','replace')" style="color:var(--red);">전체 되돌리기</button>
       </div>
     </div>`).join('');
   const el = document.getElementById('backupListArea');
@@ -3795,24 +4041,72 @@ async function downloadBackup(backupId){
   notify('백업 파일을 다운로드했어요.');
 }
 
-async function restoreBackup(backupId){
-  if(!confirm('이 백업으로 복원하면 현재 데이터가 덮어써져요. 계속할까요?')) return;
+/* Firestore 배치는 1회 500건 제한 → 나눠서 커밋합니다. */
+async function commitInChunks(ops){
+  const SIZE = 400;
+  for(let i = 0; i < ops.length; i += SIZE){
+    const batch = db.batch();
+    ops.slice(i, i + SIZE).forEach(fn => fn(batch));
+    await batch.commit();
+  }
+}
+
+/* mode:
+   'merge'  — 점유율만 되살리기. 백업 이후 추가된 매장은 그대로 둡니다. (권장)
+   'replace'— 백업 시점으로 완전 되돌리기. 이후 추가분은 사라집니다.       */
+async function restoreBackup(backupId, mode){
+  if(!db || !fbUser){ notify('로그인이 필요해요.'); return; }
+  mode = mode || 'merge';
+  const warn = mode === 'replace'
+    ? '백업 시점으로 완전히 되돌립니다.\n\n백업 이후에 추가한 후보지·매장은 사라집니다.\n계속할까요?'
+    : '백업에 담긴 점유율·벤더·메모를 되살립니다.\n\n백업 이후 추가된 매장은 그대로 남습니다.\n계속할까요?';
+  if(!confirm(warn)) return;
+
   const snap = await db.collection('backups').doc(backupId).get();
   if(!snap.exists){ notify('백업을 찾을 수 없어요.'); return; }
   const d = snap.data();
   try{
-    const snapshot = JSON.parse(d.data);
-    // sites 복원
-    if(snapshot.sites){
-      const batch = db.batch();
-      // 기존 삭제
-      const existing = await db.collection('sites').get();
-      existing.forEach(doc=> batch.delete(doc.ref));
-      // 복원
-      snapshot.sites.forEach(s=> batch.set(db.collection('sites').doc(s.id), s));
-      await batch.commit();
+    const s = JSON.parse(d.data);
+    const bkSites   = Array.isArray(s.sites)   ? s.sites   : [];
+    const bkRegions = Array.isArray(s.regions) ? s.regions : [];
+    const bkCafes   = Array.isArray(s.cafes)   ? s.cafes   : [];
+    let nSite = 0, nRegion = 0, nCafe = 0;
+    notify('복원 중이에요… 창을 닫지 말아 주세요.');
+
+    // ── 지역: 항상 병합 (지역은 지우지 않습니다)
+    if(bkRegions.length){
+      const ops = bkRegions.filter(r => r && r.id)
+        .map(r => b => b.set(db.collection('regions').doc(r.id), r, { merge:true }));
+      await commitInChunks(ops); nRegion = ops.length;
     }
-    notify(`${d.label} 백업으로 복원했어요. (후보지 ${snapshot.sites?.length||0}개)`);
+
+    // ── 매장(점유율)
+    if(bkCafes.length){
+      const ops = [];
+      if(mode === 'replace'){
+        const cur = await db.collection('cafes').get();
+        const keep = new Set(bkCafes.map(c => c.id));
+        cur.forEach(doc => { if(!keep.has(doc.id)) ops.push(b => b.delete(doc.ref)); });
+      }
+      bkCafes.filter(c => c && c.id)
+        .forEach(c => ops.push(b => b.set(db.collection('cafes').doc(c.id), c, { merge:true })));
+      await commitInChunks(ops); nCafe = bkCafes.length;
+    }
+
+    // ── 후보지
+    if(bkSites.length || mode === 'replace'){
+      const ops = [];
+      if(mode === 'replace'){
+        const cur = await db.collection('sites').get();
+        const keep = new Set(bkSites.map(x => x.id));
+        cur.forEach(doc => { if(!keep.has(doc.id)) ops.push(b => b.delete(doc.ref)); });
+      }
+      bkSites.filter(x => x && x.id)
+        .forEach(x => ops.push(b => b.set(db.collection('sites').doc(x.id), x, { merge: mode !== 'replace' })));
+      await commitInChunks(ops); nSite = bkSites.length;
+    }
+
+    notify(`${d.label} 백업 복원 완료 — 매장 ${nCafe}곳 · 후보지 ${nSite}개 · 지역 ${nRegion}개`);
   }catch(e){ notify('복원 실패: ' + (e.message||'')); }
 }
 
