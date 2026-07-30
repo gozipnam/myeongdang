@@ -934,6 +934,11 @@ function detailHTML(s,c){
     <div style="font-size:12.5px;color:var(--sub);">최근 3년 폐업 ${s.closed??'미확인'}건 · 평균 운영기간 ${s.avgyears!=null?s.avgyears+'년':'미확인'} · 경쟁 ${s.comp??'미확인'}개 기준</div>
 
     <div class="sec-title">📊 상권·입지 평가 (6대 기준)</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <button class="btn btn-ghost btn-sm" onclick="startLocEvalResearch('${s.id}')">📊 상권 지표 자동 조사</button>
+      ${(s.locEval && Object.keys(s.locEval).length) ? `<span style="font-size:11.5px;color:var(--sub);align-self:center;">인구·세대·학원 수를 AI가 채워 줍니다</span>` : `<span style="font-size:11.5px;color:var(--sub);align-self:center;">아직 조사 전이에요 — 버튼을 눌러 인구·세대 수를 받아오세요</span>`}
+    </div>
+    <div id="locEvalResearch-${s.id}" style="display:none;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;"></div>
     ${(()=>{
       const le = s.locEval || {};
       const items = [
@@ -1018,6 +1023,7 @@ function detailHTML(s,c){
         return `${catHeader}<div class="subcard" style="margin-bottom:8px;">
           <div style="font-size:13px;font-weight:700;margin-bottom:6px;">${item.title}${summary}</div>
           ${fieldsHTML}
+          ${item.title==='안정적 주거상권' && le.apt_note ? `<div style="font-size:11.5px;color:var(--sub);margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);">근거: ${esc(le.apt_note)}</div>` : ''}
         </div>`;
       }).join('');
     })()}
@@ -1032,18 +1038,60 @@ function detailHTML(s,c){
     ${simResultHTML(s,c)}
 
     <div class="sec-title">주변 스터디카페 동향 (반경 500m · 사물함 점유율 = 잘 되는지 지표)</div>
+    ${!s.lat ? `<div style="background:#FBF3DF;border-left:3px solid var(--amber);border-radius:8px;padding:9px 11px;font-size:12px;line-height:1.6;margin-bottom:8px;">
+      후보지 좌표가 없어 <b>반경 500m 자동 검색이 꺼져 있어요.</b> 아래 목록은 직접 기록한 업체라 거리가 확인되지 않은 상태입니다.<br>
+      <span style="color:var(--sub);">"🗺️ 지도"에서 위치를 지정하면 조사 DB 2,000여 곳에서 반경 500m 매장을 점유율과 함께 자동으로 불러옵니다.</span>
+    </div>` : ''}
     ${(()=>{
-      // ① 수동 기록 경쟁업체 (수정·삭제 가능)
-      const arr = (s.competitors||[]).map((cp,i)=>({cp,i}));
+      const norm = t => (t||'').replace(/\s|스터디카페|스터디까페|스터디|독서실/g,'');
+      // 조사 DB에서 이름으로 후보 찾기 (모호하면 연결하지 않음)
+      const findInDb = (name)=>{
+        const key = norm(name);
+        if(key.length < 2) return null;
+        let cand = cafes.filter(c=> norm(c.name) === key);           // ① 정확 일치
+        if(!cand.length && key.length >= 3){                          // ② 접두 일치 (지점명 표기 차이)
+          cand = cafes.filter(c=>{ const k2 = norm(c.name); return k2.startsWith(key) || key.startsWith(k2) && k2.length >= 3; });
+        }
+        if(!cand.length) return null;
+        if(cand.length > 1){
+          // 후보지 좌표가 있으면 1km 내에서 가장 가까운 것만 채택, 없으면 모호 → 연결 안 함
+          if(!(s.lat && s.lng)) return null;
+          const withD = cand.filter(c=>c.lat && c.lng)
+            .map(c=>({ c, d: haversine(s.lat, s.lng, c.lat, c.lng) }))
+            .filter(x=>x.d <= 1000).sort((a,b)=>a.d-b.d);
+          if(!withD.length) return null;
+          return withD[0].c;
+        }
+        return cand[0];
+      };
+      // ① 수동 기록 경쟁업체 (수정·삭제 가능) — 점유율이 없으면 조사 DB에서 이름으로 찾아 보강
+      const arr = (s.competitors||[]).map((cp,i)=>{
+        const c2 = { ...cp };
+        if(c2.locker == null){
+          const hit = findInDb(c2.name);
+          if(hit){
+            const o = occOf(hit);
+            if(o != null){
+              c2.locker = o;
+              c2.lockerUsed = hit.lockerUsed; c2.lockerTotal = hit.lockerTotal;
+              c2._linked = true;                                    // 조사 DB에서 가져온 값
+              c2._linkedName = hit.name;
+              c2._closed = hit.closed;
+              if(s.lat && s.lng && hit.lat && hit.lng) c2._dist = Math.round(haversine(s.lat, s.lng, hit.lat, hit.lng));
+            }
+          }
+        }
+        return { cp:c2, i };
+      });
       // ② 조사 DB에서 반경 500m 이내 매장 자동 병합 (좌표 있는 후보지만)
       const nearby = [];
       if(s.lat && s.lng){
-        const manualNames = new Set(arr.map(x=>(x.cp.name||'').replace(/\s/g,'')));
+        const manualNames = new Set(arr.map(x=>norm(x.cp.name)));
         cafes.forEach(c=>{
           if(!c.lat || !c.lng) return;
           const d = haversine(s.lat, s.lng, c.lat, c.lng);
           if(d > 500) return;
-          if(manualNames.has((c.name||'').replace(/\s/g,''))) return; // 수동 기록과 중복 제외
+          if(manualNames.has(norm(c.name))) return; // 수동 기록과 중복 제외
           const o = occOf(c);
           nearby.push({ cp:{ name:c.name, locker:o, lockerUsed:c.lockerUsed, lockerTotal:c.lockerTotal, _auto:true, _dist:Math.round(d), _closed:c.closed }, i:-1 });
         });
@@ -1057,20 +1105,51 @@ function detailHTML(s,c){
       const top = withData.slice(0, k);
       const bottom = k>0 ? withData.slice(n-k).reverse() : [];   // 낮은 순
       const rest = withData.slice(k, n-k).concat(noData);        // 중간 구간 + 점유율 미확인 (접근 유지)
-      const row = ({cp,i}, barColor)=>`
-      <div class="subcard">
-        <div class="head"><span>${esc(cp.name)||'이름 없음'}${cp._auto?`<span style="font-size:11px;color:var(--sub);font-weight:500;margin-left:6px;">📍 ${cp._dist}m</span>`:''}${cp._closed?'<span style="font-size:11px;color:var(--red);margin-left:6px;">폐업</span>':''}</span>${cp._auto?'<span style="font-size:11px;color:var(--sub);">조사 DB</span>':`<span><button class="del" style="color:var(--teal);margin-right:10px;" onclick="editCompetitor('${s.id}',${i})">수정</button><button class="del" onclick="delCompetitor('${s.id}',${i})">삭제</button></span>`}</div>
+      const row = ({cp,i}, barColor)=>{
+        const dl = (cp._auto || cp._linked) ? distLabel(cp._dist) : null;
+        const distBadge = dl
+          ? (dl.level === 'far'
+              ? `<span style="font-size:11px;color:var(--sub);font-weight:500;margin-left:6px;">📍 ${dl.text}</span>`
+              : `<span style="font-size:11px;font-weight:700;color:${dl.color};background:${dl.bg};padding:1px 7px;border-radius:5px;margin-left:6px;">${dl.level==='same'?'⚠ ':''}${dl.text}</span>`)
+          : (cp._linked ? '' : (!s.lat ? '<span style="font-size:11px;color:var(--amber);margin-left:6px;">거리 미확인</span>' : ''));
+        const srcTag = cp._auto
+          ? '<span style="font-size:11px;color:var(--sub);">조사 DB</span>'
+          : `<span>${cp._linked?`<span style="font-size:11px;color:var(--teal);margin-right:8px;" title="${esc(cp._linkedName||'')}">조사 DB 연결</span>`:''}<button class="del" style="color:var(--teal);margin-right:10px;" onclick="editCompetitor('${s.id}',${i})">수정</button><button class="del" onclick="delCompetitor('${s.id}',${i})">삭제</button></span>`;
+        return `
+      <div class="subcard"${dl&&dl.level==='same'?' style="border-left:3px solid #CE4A36;"':''}>
+        <div class="head"><span>${esc(cp.name)||'이름 없음'}${distBadge}${cp._closed?'<span style="font-size:11px;color:var(--red);margin-left:6px;">폐업</span>':''}</span>${srcTag}</div>
         <div class="meta">
           사물함 점유율 ${cp.locker!=null?`<span class="locker-bar"><i style="width:${Math.min(100,cp.locker)}%${barColor?`;background:${barColor}`:''}"></i></span><b${barColor?` style="color:${barColor}"`:''}>${cp.locker}%</b>`:'미확인'}
           · 이용 ${cp.lockerUsed!=null&&cp.lockerUsed!==''&&cp.lockerTotal!=null&&cp.lockerTotal!==''?`<b>${cp.lockerUsed}/${cp.lockerTotal}</b>개`:'—'}
         </div>
       </div>`;
+      };
       const grp = (title,color,items,barColor)=> items.length
         ? `<div style="font-size:12px;font-weight:700;color:${color};margin:12px 0 6px;letter-spacing:.02em;">${title}</div>`+items.map(x=>row(x,barColor)).join('')
         : '';
-      return grp(`⭐ 주변 잘되는 곳 · 상위 ${k}곳`, 'var(--sv-target)', top, 'var(--sv-target)')
+      return grp(`⭐ 주변 잘되는 곳 · 상위 ${k}곳`, '#0E7A5F', top, '#0E7A5F')
            + grp(`⚠ 주변 안되는 곳 · 하위 ${k}곳`, 'var(--red)', bottom, 'var(--red)')
-           + grp('그 외 · 점유율 미확인', 'var(--sub)', rest, null);
+           + grp('그 외 · 중간 구간 / 점유율 미확인', 'var(--sub)', rest, '#3D5A9E');
+    })()}
+    ${(()=>{
+      // 같은 건물·인접 건물 경쟁점 경고
+      if(!s.lat || !s.lng) return '';
+      const close = cafes
+        .filter(c=>c.lat && c.lng && !c.closed)
+        .map(c=>({ c, d: haversine(s.lat, s.lng, c.lat, c.lng) }))
+        .filter(x=>x.d <= 50)
+        .sort((a,b)=>a.d-b.d);
+      if(!close.length) return '';
+      const same = close.filter(x=>x.d <= 20);
+      const adj = close.filter(x=>x.d > 20);
+      const lines = [];
+      if(same.length) lines.push(`<b>같은 건물</b>에 ${same.map(x=>`${esc(x.c.name)}${occOf(x.c)!=null?` (점유율 ${occOf(x.c)}%)`:''}`).join(', ')}`);
+      if(adj.length) lines.push(`<b>인접 건물</b>(50m 내)에 ${adj.map(x=>`${esc(x.c.name)} ${Math.round(x.d)}m`).join(', ')}`);
+      return `<div style="margin-top:10px;background:#FAE8E4;border-left:3px solid #CE4A36;border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.7;">
+        <b style="color:#CE4A36;">⚠ 초근접 경쟁점 확인</b><br>
+        ${lines.join('<br>')}<br>
+        <span style="color:var(--sub);font-size:11.5px;">좌표 기준 추정입니다. 같은 건물·바로 옆 건물이면 회원 확보에 직접적인 영향이 있으므로 현장에서 층·출입구·간판 위치를 함께 확인해 주세요.</span>
+      </div>`;
     })()}
     <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="toggleAddForm('cpForm-${s.id}')">+ 경쟁업체 기록</button>
     <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="openSurveyImport('${s.id}')">📥 조사 툴에서 불러오기</button>
@@ -1160,7 +1239,16 @@ async function toggleSiteMap(id){
   box.innerHTML = '<div style="padding:20px;text-align:center;color:var(--sub);font-size:13px;">지도 준비 중…</div>';
   // 후보지 좌표
   let center = (s.lat && s.lng) ? {lat:s.lat, lng:s.lng} : await geocode(s.addr);
-  if(!center){ box.innerHTML = '<div style="padding:20px;text-align:center;color:var(--sub);font-size:13px;">후보지 주소의 좌표를 찾지 못했어요.</div>'; return; }
+  if(!center){
+    box.innerHTML = `<div style="padding:18px;text-align:center;font-size:13px;line-height:1.7;">
+      <div style="color:var(--sub);margin-bottom:10px;">후보지 주소의 좌표를 찾지 못했어요.<br>
+        <span style="font-size:12px;">신설된 구(예: 화성시 동탄구)나 상세주소 때문일 수 있어요.</span></div>
+      <button class="btn btn-primary btn-sm" onclick="pickCoordFromMap('${s.id}')">🗺️ 지도에서 위치 직접 찍기</button>
+      <button class="btn btn-ghost btn-sm" onclick="enterCoordManually('${s.id}')">좌표 직접 입력</button>
+      <div style="font-size:11.5px;color:var(--sub);margin-top:8px;">네이버 지도에서 해당 위치를 우클릭 → "이 위치의 좌표"로 확인할 수 있어요.</div>
+    </div>`;
+    return;
+  }
   // 후보지 좌표 저장(다음번 빠르게)
   if(!s.lat){ s.lat = center.lat; s.lng = center.lng; persist(); }
   const pins = [{ lat:center.lat, lng:center.lng, label:`📍 ${s.name}`, color:'#3D5A9E', sub:`후보지 · ${s.addr}` }];
@@ -1174,7 +1262,65 @@ async function toggleSiteMap(id){
   });
   renderMap('siteMap-' + id, pins, center, { lockCenter: true });
 }
+// 후보지와 경쟁점 사이 거리를 사람이 읽기 좋은 라벨로 (같은 건물 여부 강조)
+function distLabel(d){
+  if(d == null) return null;
+  if(d <= 20)  return { text:'같은 건물', color:'#CE4A36', bg:'#FAE8E4', level:'same' };
+  if(d <= 50)  return { text:`인접 건물 ${Math.round(d)}m`, color:'#CE4A36', bg:'#FAE8E4', level:'adjacent' };
+  if(d <= 150) return { text:`같은 블록 ${Math.round(d)}m`, color:'#B07C10', bg:'#FBF3DF', level:'block' };
+  return { text:`${Math.round(d)}m`, color:'#5B6770', bg:'transparent', level:'far' };
+}
+
 function toggleAddForm(id){ document.getElementById(id)?.classList.toggle('open'); }
+
+/* ---------- 좌표를 못 찾을 때: 지도에서 찍기 / 직접 입력 ---------- */
+async function pickCoordFromMap(id){
+  const s = sites.find(x=>x.id===id); if(!s) return;
+  const box = document.getElementById('siteMap-' + id); if(!box) return;
+  // 시·군·구까지만으로 대략 위치를 잡아 지도를 띄운다
+  const rough = await geocode((s.addr||'').split(' ').slice(0,2).join(' ')) || { lat:37.5665, lng:126.9780 };
+  box.innerHTML = `<div style="font-size:12.5px;color:var(--sub);padding:8px 4px;">지도를 탭해서 후보지 위치를 지정해 주세요. 지정하면 바로 저장됩니다.</div>
+    <div id="pickMap-${id}" style="height:320px;border-radius:12px;overflow:hidden;border:1px solid var(--line);"></div>`;
+  try{
+    await ensureNaverMap();
+    const map = new naver.maps.Map(document.getElementById('pickMap-'+id), {
+      center: new naver.maps.LatLng(rough.lat, rough.lng), zoom: 15
+    });
+    let mk = null;
+    naver.maps.Event.addListener(map, 'click', async (e)=>{
+      const lat = e.coord.lat(), lng = e.coord.lng();
+      if(mk) mk.setMap(null);
+      mk = new naver.maps.Marker({ position: e.coord, map });
+      s.lat = lat; s.lng = lng;
+      await db.collection('sites').doc(id).update({ lat, lng });
+      notify('후보지 좌표를 저장했어요.');
+      siteMapOpen = null;
+      toggleSiteMap(id);   // 정상 지도로 다시 렌더
+    });
+  }catch(e){
+    box.innerHTML = '<div style="padding:18px;text-align:center;color:var(--red);font-size:13px;">지도를 불러오지 못했어요. "좌표 직접 입력"을 이용해 주세요.</div>';
+  }
+}
+
+async function enterCoordManually(id){
+  const s = sites.find(x=>x.id===id); if(!s) return;
+  const raw = prompt('위도, 경도를 쉼표로 구분해 입력해 주세요.\n예: 37.2003, 127.0728\n(네이버 지도에서 위치 우클릭 → 좌표 확인)');
+  if(!raw) return;
+  const m = raw.split(',').map(x=>parseFloat(x.trim()));
+  if(m.length !== 2 || !Number.isFinite(m[0]) || !Number.isFinite(m[1])){
+    notify('형식이 올바르지 않아요. 예: 37.2003, 127.0728');
+    return;
+  }
+  const [lat, lng] = m;
+  if(lat < 33 || lat > 39 || lng < 124 || lng > 132){
+    if(!confirm('국내 범위를 벗어난 좌표예요. 위도·경도 순서가 바뀌지 않았는지 확인해 주세요.\n그대로 저장할까요?')) return;
+  }
+  s.lat = lat; s.lng = lng;
+  await db.collection('sites').doc(id).update({ lat, lng });
+  notify('후보지 좌표를 저장했어요.');
+  siteMapOpen = null;
+  toggleSiteMap(id);
+}
 
 async function toggleCheck(id,i,val){
   const s = sites.find(x=>x.id===id); if(!s) return;
@@ -1494,6 +1640,84 @@ function simResultHTML(s,c){
   </div>
   <div style="font-size:11.5px;color:var(--sub);margin-top:4px;">인건비·전기 증가분 등 변동비는 제외된 단순 계산입니다. 보수적으로 점유율을 낮춰서도 확인해 보세요.</div>`;
 }
+/* ---------- 상권 지표 전용 자동 조사 (인구·세대·학원) ---------- */
+function startLocEvalResearch(id){
+  const s = sites.find(x=>x.id===id); if(!s) return;
+  if(!s.addr){ notify('먼저 후보지 주소를 입력해 주세요.'); return; }
+  const prompt = `한국 상권분석 도우미로서 아래 후보지의 "상권 지표"를 웹 검색으로 조사해 주세요.
+주소: ${s.addr}
+
+조사 항목 (가능한 한 모두 숫자로):
+1. pop_teen — 이 주소가 속한 행정동의 10대(10~19세) 인구 수(명).
+   행정안전부 주민등록 연령별·행정동별 인구통계를 기준으로 하세요.
+2. pop_20s — 같은 행정동의 20대(20~29세) 인구 수(명).
+3. apt_units — 반경 500m~1km 내 아파트 단지들의 세대 수 합계.
+   단지명과 각 세대수를 찾아 더해서 추정하고, 근거를 apt_note에 단지명과 세대수로 남겨 주세요.
+4. academy_cnt — 반경 500m 내 입시·교과 학원 개수(보습·종합·단과 학원 중심, 예체능 제외).
+5. highschool_cnt — 반경 1km 내 고등학교 개수.
+6. univ_cnt — 반경 1km 내 대학교(캠퍼스) 개수. 없으면 0.
+
+지침:
+- 정확한 통계를 못 찾으면 인근 유사 규모 동네·단지 규모로 합리적 추정치를 넣고, confidence를 'medium' 또는 'low'로 표기해 주세요.
+- 정말 판단이 불가능한 항목만 null로 두세요.
+- 아래 JSON만 출력해 주세요. 마크다운 백틱이나 설명문은 넣지 마세요.
+
+{"pop_teen":숫자또는null,"pop_20s":숫자또는null,"apt_units":숫자또는null,"apt_note":"단지명 세대수 근거 한 줄","academy_cnt":숫자또는null,"highschool_cnt":숫자또는null,"univ_cnt":숫자또는null,"confidence":"high|medium|low","note":"조사 요약 한 문장(존댓말)"}`;
+
+  const box = document.getElementById('locEvalResearch-' + id);
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div style="font-size:12.5px;line-height:1.6;margin-bottom:8px;">
+      📋 <b>"${esc(s.addr)}" 상권 지표 조사 요청을 복사했어요.</b><br>
+      <span style="color:var(--sub);">클로드에 붙여넣고 → 응답 JSON을 복사 → 아래에 붙여넣기</span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <button class="btn btn-primary btn-sm" onclick="window.open('https://claude.ai/new','_blank')">🤖 클로드 열기</button>
+    </div>
+    <textarea id="lePaste-${id}" rows="4" style="width:100%;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px;font-family:monospace;resize:vertical;" placeholder='{"pop_teen":3200,"pop_20s":2800,"apt_units":8500,...}'></textarea>
+    <div id="leStatus-${id}" style="font-size:12.5px;color:var(--sub);margin:6px 0;"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-primary btn-sm" onclick="applyLocEvalResearch('${id}')">적용하기</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('locEvalResearch-${id}').style.display='none'">닫기</button>
+    </div>`;
+  copyText(prompt, '상권 지표 조사 요청을 복사했어요 — 클로드에 붙여넣어 주세요.');
+  box.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+async function applyLocEvalResearch(id){
+  const s = sites.find(x=>x.id===id); if(!s) return;
+  const ta = document.getElementById('lePaste-' + id);
+  const st = document.getElementById('leStatus-' + id);
+  const raw = (ta && ta.value || '').trim();
+  if(!raw){ st.textContent = 'JSON을 붙여넣어 주세요.'; return; }
+  let r = null;
+  try{
+    let t = raw.replace(/^```json?\s*/i,'').replace(/```\s*$/,'').trim();
+    const a = t.indexOf('{'), b = t.lastIndexOf('}');
+    if(a >= 0 && b > a) t = t.slice(a, b+1);
+    r = JSON.parse(t);
+  }catch(e){ st.textContent = 'JSON 형식을 인식할 수 없어요. 클로드 응답을 그대로 붙여넣어 주세요.'; return; }
+
+  const keys = ['pop_teen','pop_20s','apt_units','academy_cnt','highschool_cnt','univ_cnt'];
+  if(!s.locEval) s.locEval = {};
+  const applied = [];
+  keys.forEach(k=>{
+    if(r[k] === null || r[k] === undefined || r[k] === '') return; // 미확인은 건너뜀
+    const v = Number(r[k]);
+    if(Number.isFinite(v) && v >= 0){ s.locEval[k] = v; applied.push(k); }
+  });
+  if(r.apt_note){ s.locEval.apt_note = String(r.apt_note).slice(0,200); }
+
+  if(!applied.length){ st.textContent = '적용할 숫자가 없어요. 응답에 pop_teen 등 숫자 값이 있는지 확인해 주세요.'; return; }
+
+  try{
+    await db.collection('sites').doc(id).update({ locEval: s.locEval });
+    st.innerHTML = `<b style="color:var(--green)">✅ ${applied.length}개 항목 적용</b>${r.confidence?` · 신뢰도 ${esc(r.confidence)}`:''}${r.note?`<br><span style="color:var(--sub)">${esc(r.note)}</span>`:''}`;
+    notify('상권 지표를 반영했어요.');
+    render();
+  }catch(e){ st.textContent = '저장 실패: ' + (e.message||''); }
+}
+
 /* ---------- 상권·입지 평가 저장 ---------- */
 async function saveLocEval(id, key, val){
   const s = sites.find(x=>x.id===id); if(!s) return;
@@ -1729,7 +1953,7 @@ function ensureNaverMap(){
   return naverLoaded;
 }
 // 주소 → 좌표 (지도 로드 후 클라이언트 지오코더 사용)
-function geocode(addr){
+function geocodeOnce(addr){
   return new Promise(async (resolve)=>{
     try{
       await ensureNaverMap();
@@ -1741,6 +1965,33 @@ function geocode(addr){
       });
     }catch(e){ resolve(null); }
   });
+}
+// 주소 변형을 순차적으로 시도 (신설 구·상세주소 때문에 실패하는 경우 대응)
+function addrVariants(addr){
+  const a = (addr||'').trim().replace(/\s+/g,' ');
+  if(!a) return [];
+  const out = [a];
+  // ① 신설 구 제거: "화성시 동탄구 동탄신리천로 414" → "화성시 동탄신리천로 414"
+  const noGu = a.replace(/(시)\s+\S+구\s+/, '$1 ');
+  if(noGu !== a) out.push(noGu);
+  // ② 층·호·건물명 등 뒤쪽 상세 제거 (도로명+건물번호까지만)
+  //    "영신로9라길 16" 처럼 도로명에 숫자가 섞인 경우도 마지막 '로/길' 뒤 번호까지 인식
+  const ROAD_RE = /^(.*(?:로|길)\s*\d+(?:-\d+)?)/;
+  const roadMatch = a.match(ROAD_RE);
+  if(roadMatch && roadMatch[1] !== a) out.push(roadMatch[1]);
+  const roadNoGu = noGu.match(ROAD_RE);
+  if(roadNoGu && !out.includes(roadNoGu[1])) out.push(roadNoGu[1]);
+  // ③ 시도명 제거 (중복 표기로 실패하는 경우)
+  const noProv = a.replace(/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)\S*\s+/, '');
+  if(noProv !== a && !out.includes(noProv)) out.push(noProv);
+  return [...new Set(out)];
+}
+async function geocode(addr){
+  for(const v of addrVariants(addr)){
+    const r = await geocodeOnce(v);
+    if(r) return r;
+  }
+  return null;
 }
 // 지도 렌더: container에 pins[{lat,lng,label,color,sub}] 표시
 async function renderMap(containerId, pins, center, opts){
@@ -2150,6 +2401,29 @@ function reportParts(s,c,forPdf){
         return `<tr><td>${esc(cp.name)}${cp.memo?`<div style="font-size:11.5px;color:var(--sub);">${esc(cp.memo)}</div>`:''}</td><td>${esc(cp.open)||'—'}</td><td class="num">${lockerCell}</td><td class="num" style="font-size:12px;">${p(cp.p1h)} / ${p(cp.p100)} / ${p(cp.p4w)}</td></tr>`;
       }).join('')}
     </table>` : '<p style="color:var(--sub);">기록된 경쟁업체 없음</p>'}
+    ${(()=>{
+      // 반경 500m 조사 DB 매장 (거리·같은 건물 표기)
+      if(!s.lat || !s.lng) return '';
+      const manualNames = new Set((s.competitors||[]).map(cp=>(cp.name||'').replace(/\s/g,'')));
+      const near = cafes
+        .filter(c=>c.lat && c.lng && !manualNames.has((c.name||'').replace(/\s/g,'')))
+        .map(c=>({ c, d: haversine(s.lat, s.lng, c.lat, c.lng) }))
+        .filter(x=>x.d <= 500)
+        .sort((a,b)=>{ const oa=occOf(a.c)??-1, ob=occOf(b.c)??-1; return ob-oa; });
+      if(!near.length) return '';
+      return `<div style="font-size:12.5px;font-weight:700;margin:12px 0 6px;">반경 500m 조사 기록 (${near.length}곳)</div>
+      <table class="mini">
+        <tr><th>업체명</th><th style="text-align:right;">거리</th><th style="text-align:right;">사물함 점유율</th></tr>
+        ${near.map(({c,d})=>{
+          const o = occOf(c);
+          const dl = distLabel(d);
+          const emph = dl.level==='same' || dl.level==='adjacent';
+          return `<tr><td>${esc(c.name)}${c.closed?' <span style="color:#CE4A36;font-size:11px;">폐업</span>':''}</td>
+            <td class="num"${emph?' style="color:#CE4A36;font-weight:700;"':''}>${dl.text}</td>
+            <td class="num">${o!=null?`${o}%${c.lockerUsed&&c.lockerTotal?` (${c.lockerUsed}/${c.lockerTotal})`:''}`:'미확인'}</td></tr>`;
+        }).join('')}
+      </table>`;
+    })()}
   `;
 
   const memoBlock = forPdf
