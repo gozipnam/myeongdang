@@ -2134,16 +2134,35 @@ async function renderMap(containerId, pins, center, opts){
       bounds.extend(pos);
     });
     if(valid.length > 1){
-      map.fitBounds(bounds);
-      // 후보지 지도: 후보지를 화면 중앙에 두고 동 단위 줌 유지
-      if(center && center.lat && center.lng && opts.lockCenter){
-        map.setCenter(new naver.maps.LatLng(center.lat, center.lng));
-        const curZoom = map.getZoom();
-        if(curZoom < 15) map.setZoom(15);
-      } else if(center && center.lat && center.lng){
-        // 조사 지도: 전체 핀이 보이게 fitBounds 유지, 너무 확대되면만 완화
-        const curZoom = map.getZoom();
-        if(curZoom > 17) map.setZoom(16);
+      // 조사 지도: 내 위치를 화면 정중앙에 고정
+      if(opts.centerOnMe && center && center.lat && center.lng){
+        const me = new naver.maps.LatLng(center.lat, center.lng);
+        // 가까운 매장 5곳이 들어올 만한 반경을 구합니다 (최소 1.2km, 최대 9km)
+        const ds = valid.filter(p=>!p.isMe)
+          .map(p=>haversine(center.lat, center.lng, p.lat, p.lng))
+          .sort((a,b)=>a-b);
+        const nth = ds.length ? ds[Math.min(4, ds.length-1)] : 1500;
+        const r = Math.max(1200, Math.min(nth * 1.35, 9000));
+        // 내 위치를 기준으로 위·아래·좌·우 같은 거리만큼 범위를 잡으면 정확히 중앙에 옵니다
+        const dLat = r / 111320;
+        const dLng = r / (111320 * Math.max(0.2, Math.cos(center.lat * Math.PI / 180)));
+        const sym = new naver.maps.LatLngBounds();
+        sym.extend(new naver.maps.LatLng(center.lat + dLat, center.lng + dLng));
+        sym.extend(new naver.maps.LatLng(center.lat - dLat, center.lng - dLng));
+        map.fitBounds(sym);
+        map.setCenter(me); // fitBounds 여백 보정 후 다시 정중앙으로
+      } else {
+        map.fitBounds(bounds);
+        // 후보지 지도: 후보지를 화면 중앙에 두고 동 단위 줌 유지
+        if(center && center.lat && center.lng && opts.lockCenter){
+          map.setCenter(new naver.maps.LatLng(center.lat, center.lng));
+          const curZoom = map.getZoom();
+          if(curZoom < 15) map.setZoom(15);
+        } else if(center && center.lat && center.lng){
+          // 전체 보기: 핀이 모두 보이게 유지, 너무 확대되면만 완화
+          const curZoom = map.getZoom();
+          if(curZoom > 17) map.setZoom(16);
+        }
       }
     }
   }catch(e){
@@ -3196,6 +3215,7 @@ function renderCafeList(v){
       <button class="chip ${svFilter==='todo'?'active':''}" onclick="setSvFilter('todo')">미조사</button>
       <button class="chip" style="margin-left:auto;" onclick="startAutoSearch()">🔍 자동 검색</button>
       <button class="chip" onclick="toggleSvMap()">🗺️ 지도</button>
+      ${svMapOpen ? `<button class="chip ${svMapMe?'active':''}" onclick="toggleSvMapMe()">${svMapMe?'📍 내 위치 중심':'🗺 전체 보기'}</button>` : ''}
     </div>
     <div style="margin-bottom:12px;">
       <input id="svCafeSearch" class="inline-input" style="width:100%;font-size:14px;" placeholder="매장명 · 동 · 브랜드 검색" value="${esc(svCafeQuery)}">
@@ -3287,6 +3307,8 @@ function updateCafeListOnly(){
 }
 function setSvFilter(f){ svFilter=f; renderSurvey(); }
 let svMapOpen = false;
+let svMapMe = true; // 지도를 열면 기본으로 내 위치를 중앙에 둡니다
+function toggleSvMapMe(){ svMapMe = !svMapMe; renderSurvey(); }
 function toggleSvMap(){ svMapOpen = !svMapOpen; renderSurvey(); }
 function drawSurveyMap(){
   if(!svMapOpen || !svRegionId) return;
@@ -3344,10 +3366,12 @@ function drawSurveyMap(){
     msgs.push(`지도 표시 ${pins.filter(p=>!p.isMe).length}곳`);
     if(trimmed) msgs.push(`가까운 ${MAX_PINS}곳만 표시 (검색·필터로 좁혀보세요)`);
     if(noCoord > 0) msgs.push(`좌표 없음 ${noCoord}곳`);
+    if(center && svMapMe) msgs.push('📍 내 위치 중앙');
+    else if(!center && myLat && myLng) msgs.push('내 위치가 이 지역에서 30km 넘게 떨어져 있어요');
     info.textContent = msgs.join(' · ');
   }
 
-  renderMap('svMap', pins, center);
+  renderMap('svMap', pins, center, { centerOnMe: svMapMe && !!center });
 }
 function openRegion(id){ svRegionId=id; svFilter='all'; renderSurvey(); window.scrollTo(0,0); }
 function closeRegion(){ svRegionId=null; renderSurvey(); }
