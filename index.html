@@ -878,7 +878,6 @@ function render(){
         <button class="btn btn-ghost btn-sm" onclick="toggleDetail('${s.id}')">${open?'접기':'상세 · 현장조사'}</button>
         <button class="btn btn-ghost btn-sm" onclick="openReport('${s.id}')">보고서</button>
         ${s.addr?`<button class="btn btn-ghost btn-sm" onclick="toggleSiteMap('${s.id}')">🗺️ 지도</button>`:''}
-        ${s.addr?`<button class="btn btn-ghost btn-sm" onclick="openNaver('${s.id}')">네이버 지도</button>`:''}
         <button class="btn btn-ghost btn-sm" onclick="openForm('${s.id}')">수정</button>
         <button class="btn btn-danger btn-sm ${pendingDelete===s.id?'confirm':''}" onclick="delSite('${s.id}')">${pendingDelete===s.id?'정말 삭제할까요?':'삭제'}</button>
       </div>
@@ -1014,12 +1013,27 @@ function detailHTML(s,c){
     </div>
     ${simResultHTML(s,c)}
 
-    <div class="sec-title">주변 스터디카페 동향 (사물함 점유율 = 잘 되는지 지표)</div>
+    <div class="sec-title">주변 스터디카페 동향 (반경 500m · 사물함 점유율 = 잘 되는지 지표)</div>
     ${(()=>{
+      // ① 수동 기록 경쟁업체 (수정·삭제 가능)
       const arr = (s.competitors||[]).map((cp,i)=>({cp,i}));
-      if(!arr.length) return '<div style="font-size:13px;color:var(--sub);">아직 기록된 경쟁업체가 없어요. 사물함이 얼마나 차 있는지가 실제 매출을 가늠하는 좋은 신호입니다.</div>';
-      const withData = arr.filter(x=> x.cp.locker != null).sort((a,b)=> b.cp.locker - a.cp.locker); // 점유율 높은 순
-      const noData = arr.filter(x=> x.cp.locker == null);
+      // ② 조사 DB에서 반경 500m 이내 매장 자동 병합 (좌표 있는 후보지만)
+      const nearby = [];
+      if(s.lat && s.lng){
+        const manualNames = new Set(arr.map(x=>(x.cp.name||'').replace(/\s/g,'')));
+        cafes.forEach(c=>{
+          if(!c.lat || !c.lng) return;
+          const d = haversine(s.lat, s.lng, c.lat, c.lng);
+          if(d > 500) return;
+          if(manualNames.has((c.name||'').replace(/\s/g,''))) return; // 수동 기록과 중복 제외
+          const o = occOf(c);
+          nearby.push({ cp:{ name:c.name, locker:o, lockerUsed:c.lockerUsed, lockerTotal:c.lockerTotal, _auto:true, _dist:Math.round(d), _closed:c.closed }, i:-1 });
+        });
+      }
+      const all = arr.concat(nearby);
+      if(!all.length) return `<div style="font-size:13px;color:var(--sub);">반경 500m 내에 기록된 스터디카페가 없어요.${!s.lat?' 후보지 주소를 입력하면 조사 DB에서 자동으로 찾아옵니다.':''}</div>`;
+      const withData = all.filter(x=> x.cp.locker != null).sort((a,b)=> b.cp.locker - a.cp.locker);
+      const noData = all.filter(x=> x.cp.locker == null);
       const n = withData.length;
       const k = Math.min(5, Math.floor(n/2));           // 데이터 10곳 미만이면 겹치지 않게 자동 축소
       const top = withData.slice(0, k);
@@ -1027,10 +1041,10 @@ function detailHTML(s,c){
       const rest = withData.slice(k, n-k).concat(noData);        // 중간 구간 + 점유율 미확인 (접근 유지)
       const row = ({cp,i}, barColor)=>`
       <div class="subcard">
-        <div class="head"><span>${esc(cp.name)||'이름 없음'}</span><span><button class="del" style="color:var(--teal);margin-right:10px;" onclick="editCompetitor('${s.id}',${i})">수정</button><button class="del" onclick="delCompetitor('${s.id}',${i})">삭제</button></span></div>
+        <div class="head"><span>${esc(cp.name)||'이름 없음'}${cp._auto?`<span style="font-size:11px;color:var(--sub);font-weight:500;margin-left:6px;">📍 ${cp._dist}m</span>`:''}${cp._closed?'<span style="font-size:11px;color:var(--red);margin-left:6px;">폐업</span>':''}</span>${cp._auto?'<span style="font-size:11px;color:var(--sub);">조사 DB</span>':`<span><button class="del" style="color:var(--teal);margin-right:10px;" onclick="editCompetitor('${s.id}',${i})">수정</button><button class="del" onclick="delCompetitor('${s.id}',${i})">삭제</button></span>`}</div>
         <div class="meta">
           사물함 점유율 ${cp.locker!=null?`<span class="locker-bar"><i style="width:${Math.min(100,cp.locker)}%${barColor?`;background:${barColor}`:''}"></i></span><b${barColor?` style="color:${barColor}"`:''}>${cp.locker}%</b>`:'미확인'}
-          · 이용 ${cp.lockerUsed!=null&&cp.lockerTotal!=null?`<b>${cp.lockerUsed}/${cp.lockerTotal}</b>개`:'—'}
+          · 이용 ${cp.lockerUsed!=null&&cp.lockerUsed!==''&&cp.lockerTotal!=null&&cp.lockerTotal!==''?`<b>${cp.lockerUsed}/${cp.lockerTotal}</b>개`:'—'}
         </div>
       </div>`;
       const grp = (title,color,items,barColor)=> items.length
@@ -1132,12 +1146,13 @@ async function toggleSiteMap(id){
   // 후보지 좌표 저장(다음번 빠르게)
   if(!s.lat){ s.lat = center.lat; s.lng = center.lng; persist(); }
   const pins = [{ lat:center.lat, lng:center.lng, label:`📍 ${s.name}`, color:'#3D5A9E', sub:`후보지 · ${s.addr}` }];
-  // 주변 조사 매장(좌표 있는 것) 함께 표시
-  cafes.filter(c=>c.lat && c.lng).forEach(c=>{
+  // 주변 조사 매장 — 반경 500m 이내만
+  cafes.filter(c=>c.lat && c.lng && haversine(center.lat, center.lng, c.lat, c.lng) <= 500).forEach(c=>{
     const o = occOf(c);
+    const d = Math.round(haversine(center.lat, center.lng, c.lat, c.lng));
     pins.push({ lat:c.lat, lng:c.lng, label:`${shortName(c.name)}${c.closed?' 폐업':o!=null?` ${o}%`:''}`,
-      color: cafeStatusColor(c), occ: o ?? -1,
-      sub:`${c.name} · ${c.closed?'폐업':`사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}`}` });
+      color: cafeStatusColor(c), occ: o ?? -1, cafeId: c.id,
+      sub:`${c.name} · ${d}m · ${c.closed?'폐업':`사물함 ${c.lockerUsed||'?'}/${c.lockerTotal||'?'}`}` });
   });
   renderMap('siteMap-' + id, pins, center, { lockCenter: true });
 }
@@ -1322,14 +1337,19 @@ async function autoResearch(){
 4. 반경 500m 내 스터디카페·독서실 (경쟁업체, 이름과 간단 정보)
 5. ★최우선 확인: 반경 400m 이내에 "앤딩스터디카페" 지점이 있는지 (자사 체인 상권보호 확인). 있으면 지점명과 대략적 거리(m). 400m보다 확실히 멀면 found는 false.
 6. 스터디카페 창업 관점에서 "주의해서 봐야 할 신호" 2~4개 — 경쟁 밀집도(같은 건물·블록 집중 여부), 기존 업체의 약점(낮은 평점·가격 불만·노후 시설 = 전환 수요 기회), 수요 강점(학군·오피스), 리스크(소음·유흥가·과열)를 근거와 함께 한 문장씩.
+   ★어투 지침: 이 내용은 상권분석 담당자가 창업 상담 고객께 드리는 보고서에 그대로 실립니다. 반드시 정중한 존댓말 '~합니다/ ~됩니다 / ~로 판단됩니다 / ~을 권해 드립니다' 체로 작성해 주세요. '~다', '~된다', '~해야 한다' 같은 평서체나 명령조는 절대 쓰지 마세요. 고객을 존중하는 차분하고 전문적인 톤을 유지하고, 단정적 표현보다 근거를 곁들인 완곡한 표현을 사용해 주세요.
+   예시(좋음): "반경 300m 내 경쟁 3개소가 밀집해 있어 초기 회원 확보에 시간이 걸릴 수 있습니다."
+   예시(좋음): "인근 업체의 노후 시설에 대한 불만 리뷰가 확인되어, 신규 시설로서 전환 수요를 기대할 수 있습니다."
+   예시(나쁨): "경쟁이 심하다.", "가격을 낮춰야 한다."
 7. ★상권 지표: 해당 동/읍/면의 10대 인구(명), 20대 인구(명), 아파트 세대 수 — 통계청·부동산 데이터 기준 추정
 8. ★학군 지표: 반경 1km 이내 대학교 목록과 개수
-9. 가장 가까운 지하철역 또는 주요 버스정류장 이름과 도보 거리(분)
+9. 가장 가까운 지하철역 또는 주요 버스정류장 이름과 도보 거리(분), 그리고 직선거리(m) 추정
+10. 후보지가 주요 보행 동선(학원가·학교·아파트 단지에서 이어지는 길) 위에 있는지 판단 — 'high'(핵심 동선), 'mid'(보통), 'low'(벗어남) 중 하나
 
 반드시 아래 JSON 형식으로만 응답해. 마크다운 백틱, 설명문 없이 JSON만.
 확실하지 않은 값은 null, 목록은 확인된 것만 넣어.
 분량 제한(응답이 잘리면 안 됨): studycafes는 가까운 순 최대 8곳에 info는 25자 이내, signals는 최대 3개에 각 70자 이내, note는 한 문장.
-{"highschools":["학교명"],"middleschools":["학교명"],"academy_count":숫자또는null,"studycafes":[{"name":"업체명","info":"한 줄"}],"anding":{"found":true또는false,"name":"지점명 또는 null","approx_distance_m":숫자또는null},"signals":[{"type":"warn 또는 good","text":"신호 한 문장"}],"pop_teen":숫자또는null,"pop_20s":숫자또는null,"apt_units":숫자또는null,"universities":["대학명"],"nearest_transit":"역/정류장명 도보 O분","confidence":"high|medium|low","note":"조사 요약 한 문장"}`;
+{"highschools":["학교명"],"middleschools":["학교명"],"academy_count":숫자또는null,"studycafes":[{"name":"업체명","info":"한 줄"}],"anding":{"found":true또는false,"name":"지점명 또는 null","approx_distance_m":숫자또는null},"signals":[{"type":"warn 또는 good","text":"신호 한 문장(존댓말)"}],"pop_teen":숫자또는null,"pop_20s":숫자또는null,"apt_units":숫자또는null,"universities":["대학명"],"nearest_transit":"역/정류장명 도보 O분","transit_walk_min":숫자또는null,"transit_distance_m":숫자또는null,"flow_position":"high|mid|low 또는 null","confidence":"high|medium|low","note":"조사 요약 한 문장(존댓말)"}`;
 
   try{
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -1387,6 +1407,20 @@ async function autoResearch(){
     const univs = Array.isArray(r.universities) ? r.universities : [];
     researchLocEval.univ_cnt = univs.length;
     if(r.nearest_transit) researchLocEval.nearest_station = r.nearest_transit;
+    // 입지 자동 판정 — 보행 300m / 교통 접근성 / 유입 동선
+    const walkMin = Number(r.transit_walk_min);
+    const distM = Number(r.transit_distance_m);
+    if(Number.isFinite(distM) && distM > 0){
+      if(distM <= 300) researchLocEval.walk_300m = true;
+    } else if(Number.isFinite(walkMin) && walkMin > 0){
+      if(walkMin <= 4) researchLocEval.walk_300m = true;   // 도보 4분 ≈ 300m
+    }
+    if((Number.isFinite(walkMin) && walkMin <= 10) || (Number.isFinite(distM) && distM <= 800)){
+      researchLocEval.transit = true;
+    }
+    if(r.flow_position === 'high') researchLocEval.consumer_flow = '우위';
+    else if(r.flow_position === 'mid') researchLocEval.consumer_flow = '보통';
+    else if(r.flow_position === 'low') researchLocEval.consumer_flow = '열위';
 
     const confLabel = r.confidence === 'high' ? '신뢰도 높음' : r.confidence === 'low' ? '신뢰도 낮음 — 반드시 재확인' : '신뢰도 보통';
     box.innerHTML = `
@@ -1399,7 +1433,12 @@ async function autoResearch(){
       <b>대학교 ${univs.length}곳:</b> ${univs.map(esc).join(', ') || '확인 안 됨'}<br>
       <b>경쟁 스터디카페 ${cafes.length}곳:</b> ${cafes.map(c=>esc(c.name)).join(', ') || '확인 안 됨'}<br>
       ${r.pop_teen!=null||r.pop_20s!=null||r.apt_units!=null ? `<b>📊 상권 지표:</b> 10대 ${r.pop_teen!=null?r.pop_teen+'명':'미확인'} · 20대 ${r.pop_20s!=null?r.pop_20s+'명':'미확인'} · 아파트 ${r.apt_units!=null?r.apt_units+'세대':'미확인'}<br>`:''}
-      ${r.nearest_transit ? `<b>🚇 교통:</b> ${esc(r.nearest_transit)}<br>`:''}
+      ${r.nearest_transit ? `<b>🚇 교통:</b> ${esc(r.nearest_transit)}${Number.isFinite(Number(r.transit_distance_m))?` (약 ${r.transit_distance_m}m)`:''}<br>`:''}
+      ${(researchLocEval.walk_300m || researchLocEval.transit || researchLocEval.consumer_flow) ? `<b>📐 입지 자동 판정:</b> ${[
+        researchLocEval.walk_300m ? '보행 300m 이내 ✅' : '',
+        researchLocEval.transit ? '교통 접근성 ✅' : '',
+        researchLocEval.consumer_flow ? `소비자 동선 ${researchLocEval.consumer_flow}` : ''
+      ].filter(Boolean).join(' · ')}<br>`:''}
       ${r.note ? '<span style="color:var(--sub);">' + esc(r.note) + '</span><br>' : ''}
       ${researchSignals.length ? '<div style="margin-top:8px;"><b>🤖 AI 체크</b></div>' + researchSignals.map(g=>`<div class="ai-sig ${g.type==='warn'?'warn':'good'}">${g.type==='warn'?'⚠️':'💡'} ${esc(g.text)}</div>`).join('') : ''}
       <span style="color:var(--sub);">숫자가 폼에 입력됐어요. 저장하면 상권·입지 평가와 ${cafes.length ? '경쟁업체 목록, ' : ''}AI 체크가 함께 기록됩니다. 웹검색 기반 추정이므로 현장·지도에서 꼭 확인하세요.</span>`;
@@ -2142,13 +2181,28 @@ async function ensurePdfLibs(){
   }
   await pdfLibsPromise;
 }
-function addCanvasPaged(pdf, canvas, isFirstPage){
-  // 캔버스를 A4 높이 단위로 잘라 여러 페이지에 원본 크기로 배치
+function addCanvasPaged(pdf, canvas, isFirstPage, breaks){
+  // 캔버스를 A4 높이 단위로 잘라 여러 페이지에 배치
+  // breaks: 자르면 안 되는 블록의 시작 y좌표 목록(캔버스 픽셀) — 이 경계에 맞춰 페이지를 나눔
   const PW = 210, PH = 297;
   const pageHpx = Math.floor(canvas.width * (PH / PW));
+  const MIN_FILL = 0.45; // 페이지를 최소 45% 이상 채워야 경계 이동 허용 (여백 과다 방지)
+  const bps = (breaks || []).slice().sort((a,b)=>a-b);
   let y = 0, first = isFirstPage;
+
   while(y < canvas.height){
-    const sliceH = Math.min(pageHpx, canvas.height - y);
+    let sliceH = Math.min(pageHpx, canvas.height - y);
+
+    // 마지막 페이지가 아니면, 페이지 끝 안쪽의 가장 마지막 블록 경계로 당겨서 자름
+    if(y + sliceH < canvas.height && bps.length){
+      const limit = y + sliceH;
+      let cut = null;
+      for(const b of bps){
+        if(b > y + pageHpx * MIN_FILL && b < limit) cut = b;
+      }
+      if(cut != null) sliceH = cut - y;
+    }
+
     const slice = document.createElement('canvas');
     slice.width = canvas.width;
     slice.height = sliceH;
@@ -2178,8 +2232,16 @@ async function downloadPdf(){
     const pages = [parts.part1, parts.part2];
     for(let i=0;i<pages.length;i++){
       holder.innerHTML = `<div class="rp" style="border:none;border-radius:0;padding:36px 32px;">${pages[i]}</div>`;
-      const canvas = await html2canvas(holder, { scale:2, backgroundColor:'#ffffff' });
-      addCanvasPaged(pdf, canvas, i === 0); // 파트2는 항상 새 페이지에서 시작
+      // 자르면 안 되는 블록의 시작 위치를 미리 측정 (섹션 제목·표·카드 단위)
+      const hostTop = holder.getBoundingClientRect().top;
+      const SCALE = 2;
+      const breaks = [];
+      holder.querySelectorAll('.rp-sec, table.mini, .rp-card, .ai-sig, .rp-photo, tr').forEach(el=>{
+        const top = el.getBoundingClientRect().top - hostTop;
+        if(top > 0) breaks.push(Math.round(top * SCALE));
+      });
+      const canvas = await html2canvas(holder, { scale:SCALE, backgroundColor:'#ffffff' });
+      addCanvasPaged(pdf, canvas, i === 0, breaks); // 파트2는 항상 새 페이지에서 시작
     }
     const fname = (s.name || '후보지').replace(/[\\\/:*?"<>|\s]+/g,'_') + '_검토보고서_' + today() + '.pdf';
     pdf.save(fname);
