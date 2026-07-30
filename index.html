@@ -3458,14 +3458,14 @@ function cafeFormHTML(c){
     <div class="field"><label>매장명 *</label><input id="cf_name" class="inline-input" value="${esc(c?.name||'')}" oninput="checkDupHint()" autocomplete="off"></div>
     <div id="cf_dupHint" style="display:none;margin-top:6px;"></div>
     <div class="grid2" style="margin-top:8px;">
-      <div class="field"><label>동/지역</label><input id="cf_dong" class="inline-input" value="${esc(c?.dong||'')}" placeholder="예: 죽전동"></div>
-      <div class="field"><label>브랜드</label><input id="cf_brand" class="inline-input" value="${esc(c?.brand||'')}" placeholder="예: 멘토즈"></div>
+      <div class="field"><label>동/지역</label><input id="cf_dong" class="inline-input" value="${esc(c?.dong||'')}" placeholder="예: 죽전동" oninput="checkDupHint()"></div>
+      <div class="field"><label>브랜드</label><input id="cf_brand" class="inline-input" value="${esc(c?.brand||'')}" placeholder="예: 멘토즈" oninput="checkDupHint()"></div>
       <div class="field"><label>사물함 이용 수</label><input id="cf_lu" class="inline-input" type="number" value="${esc(c?.lockerUsed??'')}"></div>
       <div class="field"><label>사물함 총 개수</label><input id="cf_lt" class="inline-input" type="number" value="${esc(c?.lockerTotal??'')}"></div>
       <div class="field"><label>키오스크 벤더</label><select id="cf_vendor" class="inline-input">${VENDORS.map(x=>`<option ${c?.vendor===x?'selected':''}>${x}</option>`).join('')}</select></div>
       <div class="field" style="grid-column:1/-1;"><label>상태</label><div class="cf-toggles"><input type="checkbox" id="cf_target" ${c?.target?'checked':''}><label for="cf_target" class="cf-toggle cf-t"> 전환 타깃</label><input type="checkbox" id="cf_closed" ${c?.closed?'checked':''}><label for="cf_closed" class="cf-toggle cf-c"> 폐업</label></div></div>
     </div>
-    <div class="field" style="margin-top:8px;"><label>주소 (입력 시 지도에 표시)</label><input id="cf_addr" class="inline-input" value="${esc(c?.addr||'')}" placeholder="예: 서울 강북구 미아동 …"></div>
+    <div class="field" style="margin-top:8px;"><label>주소 (입력 시 지도에 표시)</label><input id="cf_addr" class="inline-input" value="${esc(c?.addr||'')}" placeholder="예: 서울 강북구 미아동 …" oninput="checkDupHint()"></div>
     <div class="field" style="margin-top:8px;"><label>메모</label><input id="cf_memo" class="inline-input" value="${esc(c?.memo||'')}"></div>
   </div>`;
 }
@@ -3818,39 +3818,79 @@ function cafeCore(s){
   return cafeKey(s).replace(/점+$/, '');
 }
 /* 두 문자열이 앞에서 몇 글자까지 같은지 셉니다. */
-function commonPrefixLen(a, b){
-  let n = 0;
-  while(n < a.length && n < b.length && a[n] === b[n]) n++;
-  return n;
+/* 브랜드를 알아냅니다. 브랜드 칸이 비어 있으면 매장명 앞부분에서 뽑습니다.
+   "초심스터디카페 남양주오남점" → "초심" */
+function brandOf(o){
+  const b = cafeKey(o && o.brand);
+  if(b.length >= 2) return b;
+  const raw = String((o && o.name) || '').trim();
+  const head = raw.split(/스터디카페|스터디까페|독서실|스터디센터|스터디룸|스터디|\s+/)[0];
+  return cafeKey(head);
 }
-/* 지금 입력한 이름과 겹칠 만한 매장을 찾습니다.
-   kind: 'same'  = 이름이 사실상 같음 (같은 지점을 또 넣는 중)
-         'brand' = 같은 브랜드로 보임 (다른 지점일 수 있음) */
+/* 지점 이름만 남깁니다. 브랜드와 끝의 '점' 한 글자를 걷어냅니다.
+   "초심스터디카페 남양주오남점" → "남양주오남"
+   "르하임 화성병점점" → "화성병점" (지명 '병점'의 점은 남겨야 합니다) */
+function branchOf(o){
+  let k = cafeKey(o && o.name);
+  const b = brandOf(o);
+  if(b && k.startsWith(b)) k = k.slice(b.length);
+  return k.replace(/점$/, '');
+}
+/* 주소를 비교용으로 다듬습니다. */
+function addrKey(s){
+  return String(s || '').replace(/\s+/g, '').replace(/[()\-]/g, '');
+}
+/* 지금 입력한 내용과 "같은 지점"으로 보이는 매장을 찾습니다.
+
+   같은 브랜드의 다른 지점은 정상입니다. 실제로 초심 다산지금점과 다산가운점이
+   같은 다산동에 함께 있습니다. 그래서 브랜드나 동이 같다는 이유로는 알리지 않고,
+   아래 세 경우만 같은 지점으로 봅니다.
+
+   kind: 'name'   = 매장명이 사실상 같음
+         'addr'   = 주소가 같음 (같은 건물)
+         'branch' = 브랜드가 같고 지점명이 서로 포함 관계
+                    ("초심 남양주오남점" 과 "초심 오남점") */
 function findDupCafes(name, excludeId){
-  const key = cafeKey(name);
+  const key  = cafeKey(name);
   const core = cafeCore(name);
   if(key.length < 2) return [];
-  const brand = (document.getElementById('cf_brand')?.value || '').trim();
-  const bKey = cafeKey(brand);
+  const gv = id => (document.getElementById(id)?.value || '').trim();
+  const me = { name, brand: gv('cf_brand') };
+  const myBrand  = brandOf(me);
+  const myBranch = branchOf(me);
+  const myAddr   = addrKey(gv('cf_addr'));
   const out = [];
   cafes.forEach(c => {
     if(!c || c.id === excludeId) return;
     const cKey = cafeKey(c.name);
     if(!cKey) return;
     const sameRegion = c.regionId === svRegionId;
+
+    // 1) 매장명이 사실상 같음 — 지역과 무관하게 알려 줍니다
     if(cKey === key || (core.length >= 2 && cafeCore(c.name) === core)){
-      out.push({ c, kind:'same', sameRegion });
-      return;
+      out.push({ c, kind:'name', sameRegion }); return;
     }
-    if(!sameRegion) return; // 브랜드 유사는 같은 지역 안에서만 봅니다
-    const byBrand = bKey.length >= 2 && cafeKey(c.brand) === bKey;
-    const byPrefix = commonPrefixLen(key, cKey) >= 2;
-    if(byBrand || byPrefix) out.push({ c, kind:'brand', sameRegion });
+    if(!sameRegion) return;
+
+    // 2) 주소가 같음 — 같은 건물이면 이름이 달라도 같은 곳입니다
+    if(myAddr.length >= 8 && addrKey(c.addr) === myAddr){
+      out.push({ c, kind:'addr', sameRegion }); return;
+    }
+
+    // 3) 브랜드가 같고, 지점명 한쪽이 다른 쪽을 품고 있음
+    if(myBrand.length >= 2 && brandOf(c) === myBrand){
+      const cb = branchOf(c);
+      const short = myBranch.length <= cb.length ? myBranch : cb;
+      const long  = myBranch.length <= cb.length ? cb : myBranch;
+      if(short.length >= 2 && long.includes(short)){
+        out.push({ c, kind:'branch', sameRegion });
+      }
+    }
   });
-  // 이름이 같은 건 앞으로, 그다음 이름순
-  return out.sort((a,b)=> (a.kind===b.kind ? 0 : a.kind==='same' ? -1 : 1)).slice(0, 6);
+  const rank = { name:0, addr:1, branch:2 };
+  return out.sort((a,b)=> rank[a.kind] - rank[b.kind]).slice(0, 6);
 }
-/* 매장명을 입력하는 동안 바로 안내를 띄웁니다. */
+/* 매장명·동·주소를 입력하는 동안 바로 안내를 띄웁니다. */
 function checkDupHint(){
   const el = document.getElementById('cf_dupHint');
   const input = document.getElementById('cf_name');
@@ -3862,28 +3902,31 @@ function checkDupHint(){
   const hits = findDupCafes(input.value.trim(), cafeEditId);
   if(!hits.length){ el.style.display = 'none'; el.innerHTML = ''; return; }
 
-  const hasSame = hits.some(h => h.kind === 'same');
-  const color = hasSame ? 'var(--red)' : 'var(--amber, #B8860B)';
+  const REASON = {
+    name: '매장명이 같습니다',
+    addr: '주소가 같습니다',
+    branch: '같은 브랜드의 같은 지점으로 보입니다'
+  };
   const rows = hits.map(h => {
     const c = h.c;
-    const occ = (c.lockerUsed !== '' && c.lockerTotal) ? ` · 점유율 ${Math.round(c.lockerUsed/c.lockerTotal*100)}%` : '';
-    const where = h.sameRegion ? (c.dong || '') : `다른 지역`;
-    return `<div style="font-size:12.5px;padding:3px 0;">
-      ${h.kind==='same'?'🔴':'🟡'} <b>${esc(c.name)}</b>
-      <span style="color:var(--sub);">${esc(where)}${esc(c.vendor && c.vendor!=='미확인' ? ' · '+c.vendor : '')}${occ}</span>
+    const occ = (c.lockerUsed !== '' && c.lockerTotal)
+      ? ` · 점유율 ${Math.round(c.lockerUsed / c.lockerTotal * 100)}%` : '';
+    const where = h.sameRegion ? (c.dong || '') : '다른 지역';
+    return `<div style="font-size:12.5px;padding:4px 0;">
+      🔴 <b>${esc(c.name)}</b>
+      <span style="color:var(--sub);">${esc(where)}${esc(c.vendor && c.vendor !== '미확인' ? ' · ' + c.vendor : '')}${occ}</span>
+      <div style="font-size:11.5px;color:var(--sub);">${REASON[h.kind] || ''}</div>
     </div>`;
   }).join('');
 
   el.style.display = 'block';
-  el.innerHTML = `<div style="border:1px solid ${color};border-radius:8px;padding:10px;background:var(--card);">
-    <div style="font-size:13px;font-weight:600;color:${color};margin-bottom:6px;">
+  el.innerHTML = `<div style="border:1px solid var(--red);border-radius:8px;padding:10px;background:var(--card);">
+    <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:6px;">
       ⚠️ 이미 등록되어 진 지점으로 확인됩니다. 확인 바랍니다
     </div>
     ${rows}
     <div style="font-size:11.5px;color:var(--sub);margin-top:6px;">
-      ${hasSame
-        ? '이름이 같은 매장이 있습니다. 같은 지점이라면 기존 매장을 수정해 주세요.'
-        : '같은 브랜드의 다른 지점이라면 그대로 저장하셔도 됩니다.'}
+      같은 지점이라면 기존 매장을 열어 수정해 주세요.
     </div>
   </div>`;
 }
