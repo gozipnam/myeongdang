@@ -1460,7 +1460,7 @@ function repairAndParse(raw){
    AI_PROXY_PASS 에 Cloudflare 의 APP_PASS 와 같은 값을 넣어 주세요.
    ═══════════════════════════════════════════════════════════ */
 const AI_PROXY_URL  = 'https://myeongdang-ai.yjyu.workers.dev';
-const AI_PROXY_PASS = 'mdang2026';   // ← 여기에 APP_PASS 값을 넣으세요
+const AI_PROXY_PASS = '';   // ← 여기에 APP_PASS 값을 넣으세요
 
 /* 자동 조사가 가능한 환경인지 확인합니다. */
 function aiAvailable(){ return IS_CLAUDE || !!AI_PROXY_URL; }
@@ -1478,9 +1478,11 @@ async function askClaude(prompt, opts){
     headers,
     body: JSON.stringify({
       model: viaProxy ? "claude-sonnet-5" : "claude-sonnet-4-6",
-      max_tokens: 1000,
+      max_tokens: viaProxy ? 8000 : 1000,
       messages: [{ role: "user", content: prompt }],
-      tools: o.search === false ? undefined : [{ "type": "web_search_20250305", "name": "web_search" }]
+      // max_uses: 웹검색 횟수 상한. 검색이 늘어날수록 이전 결과를 다시 읽어
+      // 입력 토큰이 눈덩이처럼 커지므로 비용의 가장 큰 변수입니다.
+      tools: o.search === false ? undefined : [{ "type": "web_search_20250305", "name": "web_search", "max_uses": o.maxSearch || 5 }]
     })
   });
   if(!res.ok){
@@ -1498,15 +1500,24 @@ async function askClaude(prompt, opts){
   }
   lastAiError = '';
   const data = await res.json();
-  return (data.content || []).filter(i => i.type === 'text').map(i => i.text).join('\n');
+  lastAiStop = data.stop_reason || '';
+  const text = (data.content || []).filter(i => i.type === 'text').map(i => i.text).join('\n');
+  if(!text) lastAiError = `응답에 텍스트가 없습니다 (stop_reason: ${lastAiStop || '?'})`;
+  return text;
 }
 let lastAiError = '';
+let lastAiStop = '';
 /* 응답 텍스트에서 JSON 객체({...})를 꺼냅니다. */
 function extractObject(text){
   const clean = String(text || '').replace(/```json|```/g, '').trim();
   const start = clean.indexOf('{');
-  if(start < 0) return null;
-  return repairAndParse(clean.slice(start));
+  if(start < 0){
+    lastAiError = `JSON을 찾지 못했습니다 (stop_reason: ${lastAiStop || '?'}) — 받은 내용: ${clean.slice(0, 150) || '(빈 응답)'}`;
+    return null;
+  }
+  const r = repairAndParse(clean.slice(start));
+  if(!r) lastAiError = `JSON이 중간에 끊겼습니다 (stop_reason: ${lastAiStop || '?'}, 응답 ${clean.length}자)`;
+  return r;
 }
 /* 실패 사유를 사람이 읽을 수 있는 문장으로 바꿔 줍니다. */
 function claudeErrMsg(e){
