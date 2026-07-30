@@ -938,17 +938,17 @@ function detailHTML(s,c){
       const le = s.locEval || {};
       const items = [
         {cat:'상권', title:'안정적 주거상권', fields:[
-          {key:'pop_teen',label:'10대 인구',unit:'명',std:'2,000명 이상',placeholder:'2000'},
-          {key:'pop_20s',label:'20대 인구',unit:'명',std:'2,000명 이상',placeholder:'2000'},
-          {key:'apt_units',label:'아파트 세대 수',unit:'세대',std:'4,000세대 이상',placeholder:'4000'}
+          {key:'pop_teen',label:'10대 인구',unit:'명',std:'2,000명 이상',placeholder:'2000',min:2000},
+          {key:'pop_20s',label:'20대 인구',unit:'명',std:'2,000명 이상',placeholder:'2000',min:2000},
+          {key:'apt_units',label:'아파트 세대 수',unit:'세대',std:'4,000세대 이상',placeholder:'4000',min:4000}
         ]},
         {cat:'상권', title:'전형적 학원가', fields:[
-          {key:'academy_cnt',label:'입시·교과 학원 수',unit:'개',std:'100개 이상',placeholder:'100'},
-          {key:'avg_revenue',label:'월 평균 매출액',unit:'만원',std:'2,000만원 이상',placeholder:'2000'}
+          {key:'academy_cnt',label:'입시·교과 학원 수',unit:'개',std:'100개 이상',placeholder:'100',min:100},
+          {key:'avg_revenue',label:'월 평균 매출액',unit:'만원',std:'2,000만원 이상',placeholder:'2000',min:2000}
         ]},
         {cat:'상권', title:'학군형 상권', fields:[
-          {key:'highschool_cnt',label:'고등학교 수',unit:'개',std:'2개 이상',placeholder:'2'},
-          {key:'univ_cnt',label:'대학교 수',unit:'개',std:'2개 이상',placeholder:'2'}
+          {key:'highschool_cnt',label:'고등학교 수',unit:'개',std:'2개 이상',placeholder:'2',min:2},
+          {key:'univ_cnt',label:'대학교 수',unit:'개',std:'2개 이상',placeholder:'2',min:2}
         ]},
         {cat:'입지', title:'접근성', fields:[
           {key:'walk_300m',label:'보행 접근성 (300m 이내)',type:'check',std:'도보 5분 이내'},
@@ -991,14 +991,32 @@ function detailHTML(s,c){
             </div>`;
           }
           // number
-          return `<div style="display:flex;align-items:center;gap:6px;margin:3px 0;">
+          const nv = Number(val);
+          const hasVal = val !== '' && val != null && Number.isFinite(nv);
+          const pass = hasVal && f.min != null ? nv >= f.min : null;
+          const badge = pass === null
+            ? '<span style="font-size:11px;color:var(--sub);">미확인</span>'
+            : pass
+              ? '<span style="font-size:11px;font-weight:700;color:var(--green);background:var(--green-bg);padding:1px 7px;border-radius:5px;">충족</span>'
+              : `<span style="font-size:11px;font-weight:700;color:var(--red);background:var(--red-bg);padding:1px 7px;border-radius:5px;">미달 ${f.min?Math.round(nv/f.min*100):''}%</span>`;
+          return `<div style="display:flex;align-items:center;gap:6px;margin:3px 0;flex-wrap:wrap;">
             <span style="font-size:12px;color:var(--sub);min-width:120px;">${f.label}</span>
             <input class="inline-input" type="number" style="width:90px;font-size:13px;min-height:36px;padding:4px 8px;" value="${val}" placeholder="${f.placeholder||''}" onchange="saveLocEval('${s.id}','${f.key}',this.value)">
             <span style="font-size:12px;color:var(--sub);">${f.unit||''} (${f.std})</span>
+            ${badge}
           </div>`;
         }).join('');
+        // 섹션 충족 요약 (숫자 기준이 있는 항목만 집계)
+        const numFields = item.fields.filter(f=>f.min != null);
+        let summary = '';
+        if(numFields.length){
+          const filled = numFields.filter(f=>{ const v=Number(le[f.key]); return le[f.key]!=='' && le[f.key]!=null && Number.isFinite(v); });
+          const okCnt = filled.filter(f=> Number(le[f.key]) >= f.min).length;
+          const col = filled.length===0 ? 'var(--sub)' : okCnt===numFields.length ? 'var(--green)' : okCnt===0 ? 'var(--red)' : 'var(--amber)';
+          summary = `<span style="font-size:11.5px;font-weight:700;color:${col};margin-left:8px;">${filled.length===0?'미조사':`${okCnt}/${numFields.length} 충족`}</span>`;
+        }
         return `${catHeader}<div class="subcard" style="margin-bottom:8px;">
-          <div style="font-size:13px;font-weight:700;margin-bottom:6px;">${item.title}</div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:6px;">${item.title}${summary}</div>
           ${fieldsHTML}
         </div>`;
       }).join('');
@@ -1341,8 +1359,12 @@ async function autoResearch(){
    예시(좋음): "반경 300m 내 경쟁 3개소가 밀집해 있어 초기 회원 확보에 시간이 걸릴 수 있습니다."
    예시(좋음): "인근 업체의 노후 시설에 대한 불만 리뷰가 확인되어, 신규 시설로서 전환 수요를 기대할 수 있습니다."
    예시(나쁨): "경쟁이 심하다.", "가격을 낮춰야 한다."
-7. ★상권 지표: 해당 동/읍/면의 10대 인구(명), 20대 인구(명), 아파트 세대 수 — 통계청·부동산 데이터 기준 추정
-8. ★학군 지표: 반경 1km 이내 대학교 목록과 개수
+7. ★상권 지표(중요 — 최대한 채워 주세요): 후보지가 속한 행정동 기준으로
+   - 10대 인구(10~19세, 명): 행정안전부 주민등록 연령별 인구통계 기준
+   - 20대 인구(20~29세, 명)
+   - 아파트 세대 수: 반경 500m~1km 내 아파트 단지들의 세대 수 합계 (단지명과 세대수를 더해서 추정)
+   숫자를 못 찾으면 인근 유사 규모 동네나 단지 규모로 합리적 추정치를 넣고, 정말 불가할 때만 null.
+8. ★학군 지표: 반경 1km 이내 대학교 목록과 개수 (없으면 빈 배열)
 9. 가장 가까운 지하철역 또는 주요 버스정류장 이름과 도보 거리(분), 그리고 직선거리(m) 추정
 10. 후보지가 주요 보행 동선(학원가·학교·아파트 단지에서 이어지는 길) 위에 있는지 판단 — 'high'(핵심 동선), 'mid'(보통), 'low'(벗어남) 중 하나
 
@@ -2083,24 +2105,33 @@ function reportParts(s,c,forPdf){
       const val = (k,unit) => le[k]!=null && le[k]!=='' ? (typeof le[k]==='number'?le[k].toLocaleString():le[k])+(unit||'') : '미확인';
       const chk = k => le[k] ? '✅' : '—';
       const sel = k => le[k] && le[k]!=='미확인' ? le[k] : '미확인';
+      // 기준 충족 판정
+      const MINS = { pop_teen:2000, pop_20s:2000, apt_units:4000, academy_cnt:100, avg_revenue:2000, highschool_cnt:2, univ_cnt:2 };
+      const jd = k => {
+        const v = Number(le[k]);
+        if(le[k]==='' || le[k]==null || !Number.isFinite(v)) return '<span style="color:#8A8F98">미확인</span>';
+        return v >= MINS[k]
+          ? '<b style="color:#1E9E6A">충족</b>'
+          : '<b style="color:#CE4A36">미달</b>';
+      };
       return `<div class="rp-sec">2-1. 상권·입지 평가 (6대 기준)</div>
       <table class="mini">
-        <tr><th colspan="2" style="text-align:left;color:var(--indigo);font-weight:700;">상권</th></tr>
-        <tr><td>안정적 주거상권 — 10대 인구</td><td class="num">${val('pop_teen','명')}</td></tr>
-        <tr><td>안정적 주거상권 — 20대 인구</td><td class="num">${val('pop_20s','명')}</td></tr>
-        <tr><td>안정적 주거상권 — 아파트 세대</td><td class="num">${val('apt_units','세대')}</td></tr>
-        <tr><td>전형적 학원가 — 입시·교과 학원</td><td class="num">${val('academy_cnt','개')}</td></tr>
-        <tr><td>전형적 학원가 — 월 평균 매출액</td><td class="num">${val('avg_revenue','만원')}</td></tr>
-        <tr><td>학군형 상권 — 고등학교</td><td class="num">${val('highschool_cnt','개')}</td></tr>
-        <tr><td>학군형 상권 — 대학교</td><td class="num">${val('univ_cnt','개')}</td></tr>
-        <tr><th colspan="2" style="text-align:left;color:var(--indigo);font-weight:700;padding-top:8px;">입지</th></tr>
-        <tr><td>접근성 — 보행 300m 이내</td><td class="num">${chk('walk_300m')}</td></tr>
-        <tr><td>접근성 — 교통 (지하철/버스)</td><td class="num">${chk('transit')}</td></tr>
-        <tr><td>접근성 — 가장 가까운 역/정류장</td><td class="num">${val('nearest_station')}</td></tr>
-        <tr><td>가시성 — 간판 노출도</td><td class="num">${sel('sign_visible')}</td></tr>
-        <tr><td>가시성 — 보행 시 노출도</td><td class="num">${sel('walk_visible')}</td></tr>
-        <tr><td>유입 우위성 — 소비자 경유 동선</td><td class="num">${sel('consumer_flow')}</td></tr>
-        <tr><td>유입 우위성 — 경쟁점 대비 동선</td><td class="num">${sel('vs_competitor')}</td></tr>
+        <tr><th colspan="3" style="text-align:left;color:var(--indigo);font-weight:700;">상권</th></tr>
+        <tr><td>안정적 주거상권 — 10대 인구</td><td class="num">${val('pop_teen','명')}</td><td class="num" style="width:60px;">${jd('pop_teen')}</td></tr>
+        <tr><td>안정적 주거상권 — 20대 인구</td><td class="num">${val('pop_20s','명')}</td><td class="num">${jd('pop_20s')}</td></tr>
+        <tr><td>안정적 주거상권 — 아파트 세대</td><td class="num">${val('apt_units','세대')}</td><td class="num">${jd('apt_units')}</td></tr>
+        <tr><td>전형적 학원가 — 입시·교과 학원</td><td class="num">${val('academy_cnt','개')}</td><td class="num">${jd('academy_cnt')}</td></tr>
+        <tr><td>전형적 학원가 — 월 평균 매출액</td><td class="num">${val('avg_revenue','만원')}</td><td class="num">${jd('avg_revenue')}</td></tr>
+        <tr><td>학군형 상권 — 고등학교</td><td class="num">${val('highschool_cnt','개')}</td><td class="num">${jd('highschool_cnt')}</td></tr>
+        <tr><td>학군형 상권 — 대학교</td><td class="num">${val('univ_cnt','개')}</td><td class="num">${jd('univ_cnt')}</td></tr>
+        <tr><th colspan="3" style="text-align:left;color:var(--indigo);font-weight:700;padding-top:8px;">입지</th></tr>
+        <tr><td>접근성 — 보행 300m 이내</td><td class="num" colspan="2">${chk('walk_300m')}</td></tr>
+        <tr><td>접근성 — 교통 (지하철/버스)</td><td class="num" colspan="2">${chk('transit')}</td></tr>
+        <tr><td>접근성 — 가장 가까운 역/정류장</td><td class="num" colspan="2">${val('nearest_station')}</td></tr>
+        <tr><td>가시성 — 간판 노출도</td><td class="num" colspan="2">${sel('sign_visible')}</td></tr>
+        <tr><td>가시성 — 보행 시 노출도</td><td class="num" colspan="2">${sel('walk_visible')}</td></tr>
+        <tr><td>유입 우위성 — 소비자 경유 동선</td><td class="num" colspan="2">${sel('consumer_flow')}</td></tr>
+        <tr><td>유입 우위성 — 경쟁점 대비 동선</td><td class="num" colspan="2">${sel('vs_competitor')}</td></tr>
       </table>`;
     })()}
 
