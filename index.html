@@ -1460,7 +1460,7 @@ function repairAndParse(raw){
    AI_PROXY_PASS 에 Cloudflare 의 APP_PASS 와 같은 값을 넣어 주세요.
    ═══════════════════════════════════════════════════════════ */
 const AI_PROXY_URL  = 'https://myeongdang-ai.yjyu.workers.dev';
-const AI_PROXY_PASS = '';   // ← 여기에 APP_PASS 값을 넣으세요
+const AI_PROXY_PASS = 'mdang2026';   // Cloudflare 의 APP_PASS 와 같은 값
 
 /* 자동 조사가 가능한 환경인지 확인합니다. */
 function aiAvailable(){ return IS_CLAUDE || !!AI_PROXY_URL; }
