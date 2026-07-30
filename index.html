@@ -1459,6 +1459,11 @@ function repairAndParse(raw){
    심부름꾼(프록시) 서버 설정
    AI_PROXY_PASS 에 Cloudflare 의 APP_PASS 와 같은 값을 넣어 주세요.
    ═══════════════════════════════════════════════════════════ */
+/* 배포된 파일이 최신인지 확인하는 표시입니다.
+   브라우저 콘솔에 MD_VERSION 을 입력하면 바로 볼 수 있습니다. */
+const MD_VERSION = 'v7 · 2026-07-30 · 사물함3칸·pause_turn·경로표시';
+try{ window.MD_VERSION = MD_VERSION; console.log('명당 ' + MD_VERSION); }catch(_){}
+
 const AI_PROXY_URL  = 'https://myeongdang-ai.yjyu.workers.dev';
 const AI_PROXY_PASS = 'mdang2026';   // Cloudflare 의 APP_PASS 와 같은 값
 
@@ -1471,39 +1476,58 @@ function aiAvailable(){ return IS_CLAUDE || !!AI_PROXY_URL; }
 async function askClaude(prompt, opts){
   const o = opts || {};
   const viaProxy = !IS_CLAUDE && !!AI_PROXY_URL;
+  const endpoint = viaProxy ? AI_PROXY_URL : "https://api.anthropic.com/v1/messages";
   const headers = { "Content-Type": "application/json" };
   if(viaProxy && AI_PROXY_PASS) headers["X-App-Pass"] = AI_PROXY_PASS;
-  const res = await fetch(viaProxy ? AI_PROXY_URL : "https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      model: viaProxy ? "claude-sonnet-5" : "claude-sonnet-4-6",
-      max_tokens: viaProxy ? 8000 : 1000,
-      messages: [{ role: "user", content: prompt }],
-      // max_uses: 웹검색 횟수 상한. 검색이 늘어날수록 이전 결과를 다시 읽어
-      // 입력 토큰이 눈덩이처럼 커지므로 비용의 가장 큰 변수입니다.
-      tools: o.search === false ? undefined : [{ "type": "web_search_20250305", "name": "web_search", "max_uses": o.maxSearch || 5 }]
-    })
-  });
-  if(!res.ok){
-    let detail = '';
-    try{
-      const t = await res.text();
-      try{ const j = JSON.parse(t); detail = (j.error && (j.error.message || j.error)) || j.message || t; }
-      catch(_){ detail = t; }
-    }catch(_){}
-    lastAiError = `HTTP ${res.status}` + (detail ? ` — ${String(detail).slice(0,300)}` : '');
-    console.error('askClaude 실패:', lastAiError);
-    if(res.status === 401 || res.status === 403) throw new Error('auth');
-    if(res.status === 429) throw new Error('http 429');
-    throw new Error('http ' + res.status);
+  const tools = o.search === false ? undefined
+    : [{ "type": "web_search_20250305", "name": "web_search", "max_uses": o.maxSearch || 5 }];
+
+  const messages = [{ role: "user", content: prompt }];
+  let lastText = '', allText = '';
+
+  // 검색이 길어지면 API 가 stop_reason:"pause_turn" 으로 턴을 끊습니다.
+  // 그때는 받은 응답을 그대로 되돌려 보내 이어서 진행해야 합니다.
+  for(let turn = 0; turn < 4; turn++){
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: viaProxy ? "claude-sonnet-5" : "claude-sonnet-4-6",
+        max_tokens: viaProxy ? 8000 : 1000,
+        messages,
+        tools
+      })
+    });
+    if(!res.ok){
+      let detail = '';
+      try{
+        const t = await res.text();
+        try{
+          const j = JSON.parse(t);
+          const e = j.error || {};
+          detail = [e.type, e.message || (typeof j.error === 'string' ? j.error : '') || j.message]
+                     .filter(Boolean).join(': ') || t;
+        }catch(_){ detail = t; }
+      }catch(_){}
+      lastAiError = `HTTP ${res.status}` + (detail ? ` — ${String(detail).slice(0,400)}` : '')
+                    + ` [경로: ${viaProxy ? '심부름꾼 서버' : '클로드 직접'}] [${MD_VERSION}]`;
+      console.error('askClaude 실패:', lastAiError);
+      if(res.status === 401 || res.status === 403) throw new Error('auth');
+      if(res.status === 429) throw new Error('http 429');
+      throw new Error('http ' + res.status);
+    }
+    const data = await res.json();
+    lastAiStop = data.stop_reason || '';
+    lastText = (data.content || []).filter(i => i.type === 'text').map(i => i.text).join('\n');
+    allText += lastText;
+    if(lastAiStop !== 'pause_turn') break;
+    messages.push({ role: "assistant", content: data.content });  // 멈춘 응답을 그대로 되돌려 보냄
   }
+
   lastAiError = '';
-  const data = await res.json();
-  lastAiStop = data.stop_reason || '';
-  const text = (data.content || []).filter(i => i.type === 'text').map(i => i.text).join('\n');
-  if(!text) lastAiError = `응답에 텍스트가 없습니다 (stop_reason: ${lastAiStop || '?'})`;
-  return text;
+  const out = lastText || allText;
+  if(!out) lastAiError = `응답에 텍스트가 없습니다 (stop_reason: ${lastAiStop || '?'})`;
+  return out;
 }
 let lastAiError = '';
 let lastAiStop = '';
@@ -1522,9 +1546,18 @@ function extractObject(text){
 /* 실패 사유를 사람이 읽을 수 있는 문장으로 바꿔 줍니다. */
 function claudeErrMsg(e){
   const m = (e && e.message) || '';
-  if(m === 'auth') return AI_PROXY_URL
-    ? '심부름꾼 서버 인증에 실패했어요. 접속 암호를 확인해 주세요.'
-    : '자동 조사를 쓸 수 없는 환경이에요. 아래 「직접 입력」으로 진행해 주세요.';
+  if(m === 'auth'){
+    const d = lastAiError || '';
+    if(d.indexOf('credit') >= 0 || d.indexOf('billing') >= 0)
+      return '크레딧이 부족해요. 콘솔에서 잔액을 충전해 주세요.';
+    if(d.indexOf('permission') >= 0)
+      return '계정 권한 문제로 거절됐어요. 아래 내용을 확인해 주세요.';
+    if(d.indexOf('authentication') >= 0)
+      return 'API 키가 유효하지 않아요. 콘솔에서 키를 다시 발급해 주세요.';
+    return AI_PROXY_URL
+      ? '요청이 거절됐어요. 아래 내용을 확인해 주세요.'
+      : '자동 조사를 쓸 수 없는 환경이에요. 아래 「직접 입력」으로 진행해 주세요.';
+  }
   if(m === 'http 429') return '요청이 몰렸어요. 30초쯤 뒤에 다시 눌러 주세요.';
   if(m.indexOf('http') === 0) return '조사 서버 응답이 없었어요. 잠시 후 다시 시도해 주세요.';
   return '결과를 읽지 못했어요. 다시 시도해 주세요.';
@@ -3479,494 +3512,120 @@ async function addRegion(){
 
 /* ---- 매장 CRUD (prompt 기반 간단 입력 폼) ---- */
 function cafeFormHTML(c){
+  const today = new Date().toISOString().slice(0,10);
+  const U = (c?.lockerUsed ?? '') === '' ? null : Number(c.lockerUsed);
+  const T = (c?.lockerTotal ?? '') === '' ? null : Number(c.lockerTotal);
+  const F = (U !== null && T !== null) ? Math.max(0, T - U) : '';
   return `<div style="text-align:left;">
-    <div class="field"><label>매장명 *</label><input id="cf_name" class="inline-input" value="${esc(c?.name||'')}" oninput="checkDupHint()" autocomplete="off"></div>
+    <div class="field"><label>매장명 *</label><input id="cf_name" class="inline-input" value="${esc(c?.name||'')}" oninput="onCafeNameInput()" autocomplete="off"></div>
     <div id="cf_dupHint" style="display:none;margin-top:6px;"></div>
-    <div class="grid2" style="margin-top:8px;">
-      <div class="field"><label>동/지역</label><input id="cf_dong" class="inline-input" value="${esc(c?.dong||'')}" placeholder="예: 죽전동" oninput="checkDupHint()"></div>
-      <div class="field"><label>브랜드</label><input id="cf_brand" class="inline-input" value="${esc(c?.brand||'')}" placeholder="예: 멘토즈" oninput="checkDupHint()"></div>
-      <div class="field"><label>사물함 이용 수</label><input id="cf_lu" class="inline-input" type="number" value="${esc(c?.lockerUsed??'')}" oninput="markSurveyedToday()"></div>
-      <div class="field"><label>사물함 총 개수</label><input id="cf_lt" class="inline-input" type="number" value="${esc(c?.lockerTotal??'')}" oninput="markSurveyedToday()"></div>
-      <div class="field" style="grid-column:1/-1;">
-        <label>조사일</label>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;">
-          <span style="color:var(--sub);">${c?.lockerDate ? esc(c.lockerDate) : '기록 없음'}</span>
-          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
-            <input type="checkbox" id="cf_dateToday" ${c?.lockerDate?'':'checked'} style="width:16px;height:16px;">
-            <span>오늘(${new Date().toISOString().slice(0,10)})로 갱신</span>
-          </label>
+
+    <div class="field" style="margin-top:10px;"><label>사물함 현황</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+        <div>
+          <div style="font-size:11.5px;color:var(--sub);margin-bottom:3px;">이용 중</div>
+          <input id="cf_lu" class="inline-input" type="number" min="0" value="${esc(String(c?.lockerUsed ?? ''))}" oninput="lockerCalc('lu')" placeholder="0">
         </div>
-        <div style="font-size:11.5px;color:var(--sub);margin-top:4px;">사물함 수를 입력하면 자동으로 체크됩니다. 값이 지난번과 같아도 조사일은 오늘로 기록됩니다.</div>
+        <div>
+          <div style="font-size:11.5px;color:var(--sub);margin-bottom:3px;">빈 자리</div>
+          <input id="cf_lf" class="inline-input" type="number" min="0" value="${esc(String(F))}" oninput="lockerCalc('lf')" placeholder="0">
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--sub);margin-bottom:3px;">전체</div>
+          <input id="cf_lt" class="inline-input" type="number" min="0" value="${esc(String(c?.lockerTotal ?? ''))}" oninput="lockerCalc('lt')" placeholder="0">
+        </div>
       </div>
+      <div id="cf_occ" style="font-size:12.5px;margin-top:6px;color:var(--sub);"></div>
+      <div style="font-size:11.5px;color:var(--sub);margin-top:3px;">전체 개수를 넣으면 <b>이용 중</b>과 <b>빈 자리</b> 중 하나만 세도 나머지가 자동으로 채워집니다.</div>
+    </div>
+
+    <div class="field" style="margin-top:8px;"><label>주소 (입력 시 지도에 표시)</label><input id="cf_addr" class="inline-input" value="${esc(c?.addr||'')}" placeholder="예: 경기 남양주시 오남읍 진건오남로 511" oninput="onCafeAddrInput()"></div>
+
+    <div class="field" style="margin-top:8px;">
+      <label>조사일</label>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;">
+        <span style="color:var(--sub);">${c?.lockerDate ? esc(c.lockerDate) : '기록 없음'}</span>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+          <input type="checkbox" id="cf_dateToday" ${c?.lockerDate?'':'checked'} style="width:16px;height:16px;">
+          <span>오늘(${today})로 갱신</span>
+        </label>
+      </div>
+      <div style="font-size:11.5px;color:var(--sub);margin-top:4px;">사물함 수를 입력하면 자동으로 체크됩니다. 값이 지난번과 같아도 조사일은 오늘로 기록됩니다.</div>
+    </div>
+
+    <div class="grid2" style="margin-top:8px;">
       <div class="field"><label>키오스크 벤더</label><select id="cf_vendor" class="inline-input">${VENDORS.map(x=>`<option ${c?.vendor===x?'selected':''}>${x}</option>`).join('')}</select></div>
       <div class="field" style="grid-column:1/-1;"><label>상태</label><div class="cf-toggles"><input type="checkbox" id="cf_target" ${c?.target?'checked':''}><label for="cf_target" class="cf-toggle cf-t"> 전환 타깃</label><input type="checkbox" id="cf_closed" ${c?.closed?'checked':''}><label for="cf_closed" class="cf-toggle cf-c"> 폐업</label></div></div>
     </div>
-    <div class="field" style="margin-top:8px;"><label>주소 (입력 시 지도에 표시)</label><input id="cf_addr" class="inline-input" value="${esc(c?.addr||'')}" placeholder="예: 서울 강북구 미아동 …" oninput="checkDupHint()"></div>
+
     <div class="field" style="margin-top:8px;"><label>메모</label><input id="cf_memo" class="inline-input" value="${esc(c?.memo||'')}"></div>
-  </div>`;
-}
-/* ---- 스터디카페 자동 검색 (클립보드 + claude.ai 리디렉트) ---- */
-function startAutoSearch(){
-  const r = regions.find(x=>x.id===svRegionId);
-  if(!r){ notify('지역을 먼저 선택해 주세요.'); return; }
-  const name = r.name; // e.g. "경기 화성시"
-  const prompt = `${name} 지역에 있는 "스터디카페"를 모두 조사해서 JSON 배열로 알려줘.
 
-중요 조건:
-- 반드시 "스터디카페" 또는 "독서실"만 포함 (일반 카페, 커피숍, 프랜차이즈 카페 제외)
-- 매장명에 "스터디카페", "스터디", "독서실", "스터디룸" 등이 포함된 곳만
-- 할리스, 스타벅스, 투썸 같은 일반 카페는 절대 포함하지 마
-- 동/읍/면 단위로 빠짐없이 조사 (네이버 지도 기준)
-- 폐업 확인된 곳은 제외
-- JSON만 출력 (설명, 백틱, 마크다운 없이 순수 JSON 배열만)
-
-각 매장 필드:
-- name: 매장명 (예: "공본 스터디카페 동탄점")
-- dong: 동/읍/면 (예: "반송동")
-- brand: 브랜드명 또는 "독립" (예: "공본 체인", "독립")
-
-출력 형식:
-[{"name":"공본 스터디카페 동탄점","dong":"반송동","brand":"공본 체인"},{"name":"르하임 화성병점점","dong":"병점동","brand":"르하임"}]`;
-
-  const box = document.getElementById('svAutoSearch');
-  const guide = document.getElementById('svSearchGuide');
-  const paste = document.getElementById('svSearchPaste');
-  box.style.display = 'block';
-
-  /* ── 자동 조사 가능: 복사·붙여넣기 없이 바로 조사 ── */
-  if(aiAvailable()){
-    paste.style.display = 'none';
-    guide.innerHTML = `🔍 <b>"${esc(name)}"</b> 지역 스터디카페를 조사하고 있어요…
-      <span style="color:var(--sub);font-size:13px;">(20~40초)</span>`;
-    box.scrollIntoView({behavior:'smooth', block:'nearest'});
-    runAutoSearch(prompt, name);
-    return;
-  }
-
-  /* ── 브라우저(깃허브): 기존 복사·붙여넣기 방식 유지 ── */
-  guide.innerHTML = `📋 <b>"${esc(name)}" 스터디카페 검색 요청이 복사됐어요.</b><br>
-    <span style="color:var(--sub);font-size:13px;">클로드에 붙여넣고 → 응답 JSON을 복사 → 아래에 붙여넣기</span><br>
-    <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="window.open('https://claude.ai/new','_blank')">🤖 클로드 열기</button>
-    <button class="btn btn-sm" style="margin-top:8px;" onclick="document.getElementById('svSearchPaste').style.display='block'">📋 결과 붙여넣기</button>`;
-  paste.style.display = 'none';
-  document.getElementById('svPasteArea').value = '';
-  copyText(prompt, '검색 요청을 복사했어요 — 클로드에 붙여넣어 전송하세요.');
-  box.scrollIntoView({behavior:'smooth', block:'nearest'});
-}
-
-function repairJSON(s){
-  // 잘린 JSON 복구: 마지막 완전한 }] 까지만 추출
-  s = s.trim();
-  if(s.startsWith('```')) s = s.replace(/^```json?\s*/,'').replace(/```\s*$/,'');
-  s = s.trim();
-  // 배열 시작 찾기
-  const start = s.indexOf('[');
-  if(start < 0) return null;
-  s = s.slice(start);
-  try{ return JSON.parse(s); }catch(e){}
-  // 잘린 경우: 마지막 } 이후 ] 추가
-  const lastBrace = s.lastIndexOf('}');
-  if(lastBrace > 0){
-    const cut = s.slice(0, lastBrace + 1);
-    try{ return JSON.parse(cut + ']'); }catch(e2){}
-  }
-  return null;
-}
-
-/* 아티팩트 전용: 클로드에게 직접 물어 결과를 바로 등록합니다.
-   응답 길이 제한으로 목록이 잘릴 수 있어, 다시 실행하면 누락분만 추가됩니다. */
-async function runAutoSearch(prompt, name){
-  const guide = document.getElementById('svSearchGuide');
-  const retry = `<button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="startAutoSearch()">🔄 이어서 더 조사</button>
-    <button class="btn btn-sm" style="margin-top:8px;" onclick="document.getElementById('svSearchPaste').style.display='block'">✍️ 직접 붙여넣기</button>`;
-  try{
-    const arr = repairJSON(await askClaude(prompt));
-    if(!arr || !Array.isArray(arr) || !arr.length) throw new Error('parse fail');
-    const res = await registerCafes(arr);
-    if(!res.ok){
-      guide.innerHTML = `⚠️ ${esc(res.msg)}<br>${retry}`;
-      return;
-    }
-    guide.innerHTML = `<b style="color:var(--green)">✅ ${res.added}곳 등록 완료</b>${res.dupes?` <span style="color:var(--sub);">(중복 ${res.dupes}곳 제외)</span>`:''}<br>
-      <span style="color:var(--sub);font-size:12.5px;">응답 길이 제한으로 일부가 빠졌을 수 있어요. 한 번 더 누르면 누락분만 추가됩니다.</span><br>${retry}`;
-  }catch(e){
-    guide.innerHTML = `⚠️ ${esc(claudeErrMsg(e))}${lastAiError?`<div style="font-size:11.5px;color:var(--sub);font-family:monospace;word-break:break-all;margin:4px 0;">${esc(lastAiError)}</div>`:'<br>'}${retry}`;
-  }
-}
-
-async function parsePastedCafes(){
-  const raw = document.getElementById('svPasteArea').value.trim();
-  if(!raw){ notify('JSON을 붙여넣어 주세요.'); return; }
-  const arr = repairJSON(raw);
-  if(!arr || !Array.isArray(arr) || !arr.length){
-    notify('JSON 형식을 인식할 수 없어요. 클로드 응답을 그대로 복사해서 붙여넣어 주세요.');
-    return;
-  }
-  const res = await registerCafes(arr);
-  notify(res.ok ? `${res.added}곳 등록 완료${res.dupes?` (중복 ${res.dupes}곳 제외)`:''}` : res.msg);
-  if(res.ok) document.getElementById('svAutoSearch').style.display = 'none';
-}
-
-/* 매장 배열을 현재 선택 지역에 등록합니다. 자동·수동 양쪽에서 씁니다. */
-async function registerCafes(arr){
-  // 유효성 검사
-  const valid = arr.filter(x => x && typeof x.name === 'string' && x.name.trim());
-  if(!valid.length) return { ok:false, msg:'매장명(name)이 있는 항목이 없어요.' };
-
-  // 기존 매장 이름과 중복 체크
-  const existing = new Set(cafes.filter(c=>c.regionId===svRegionId).map(c=>(c.name||'').replace(/\s/g,'')));
-  const newItems = valid.filter(x => !existing.has(x.name.replace(/\s/g,'')));
-  const dupes = valid.length - newItems.length;
-
-  if(!newItems.length){
-    return { ok:false, msg:`${valid.length}곳 전부 이미 등록된 매장이에요.` };
-  }
-
-  // Firestore 배치 등록
-  const batch = db.batch();
-  newItems.forEach(x => {
-    const docId = svRegionId + '__auto_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
-    batch.set(db.collection('cafes').doc(docId), {
-      id: docId, regionId: svRegionId,
-      name: x.name.trim(), dong: (x.dong||'').trim(), brand: (x.brand||'').trim(),
-      addr: '', lockerUsed: '', lockerTotal: '', vendor: '미확인',
-      target: false, nonres: false, lockerDate: '', memo: '',
-      updatedBy: (fbUser&&fbUser.email)||'', updatedAt: Date.now()
-    });
-  });
-  await batch.commit();
-  return { ok:true, added:newItems.length, dupes };
-}
-
-/* ---------- 네이버 책갈피 가져오기 ---------- */
-function toggleNaverImport(){
-  const p = document.getElementById('naverImportPanel');
-  if(p) p.style.display = p.style.display === 'none' ? 'block' : 'none';
-}
-
-// 시도 표기 통일
-const NV_PROVINCE = {
-  '서울특별시':'서울','서울시':'서울','서울':'서울',
-  '부산광역시':'부산','부산시':'부산','부산':'부산',
-  '대구광역시':'대구','대구시':'대구','대구':'대구',
-  '인천광역시':'인천','인천시':'인천','인천':'인천',
-  '광주광역시':'광주','광주시':'광주',
-  '대전광역시':'대전','대전시':'대전','대전':'대전',
-  '울산광역시':'울산','울산시':'울산','울산':'울산',
-  '세종특별자치시':'세종','세종시':'세종','세종':'세종',
-  '경기도':'경기','경기':'경기',
-  '강원특별자치도':'강원','강원도':'강원','강원':'강원',
-  '충청북도':'충북','충북':'충북','충청남도':'충남','충남':'충남',
-  '전북특별자치도':'전북','전라북도':'전북','전북':'전북',
-  '전라남도':'전남','전남':'전남',
-  '경상북도':'경북','경북':'경북','경상남도':'경남','경남':'경남',
-  '제주특별자치도':'제주','제주도':'제주','제주':'제주'
-};
-
-// 주소 → { region:"경기 화성시", dong:"산척동" }
-function parseNaverAddr(addr){
-  if(!addr) return null;
-  const t = addr.trim().replace(/\s+/g,' ').split(' ');
-  if(t.length < 2) return null;
-  const prov = NV_PROVINCE[t[0]];
-  if(!prov) return null;
-  let sgg = t[1] || '';
-  // "화성시 동탄구" 처럼 시 뒤에 구가 오면 시까지만 사용
-  if(!/[시군구]$/.test(sgg)) return null;
-  const region = prov + ' ' + sgg;
-  // 동/읍/면/가/리 찾기
-  let dong = '';
-  for(let i=2;i<t.length;i++){
-    if(/(동|읍|면|가|리)$/.test(t[i]) && !/(로|길)$/.test(t[i])){ dong = t[i]; break; }
-  }
-  return { region, dong };
-}
-
-// displayName + memo 에서 점유율·사물함·조사일·브랜드 추출
-// 예: "플랜에이 20% 14/68, 260727" / "폐점" / "미라클 27%" / memo "26-07-09 ← 24-11-08,29%"
-function parseNaverOcc(displayName, memo){
-  const out = { used:'', total:'', pct:null, closed:false, date:'', brand:'', history:'' };
-  const d = (displayName||'').trim();
-  const mm = (memo||'').trim();
-
-  if(/폐업|폐점/.test(d) || /폐업|폐점/.test(mm)) out.closed = true;
-
-  // 사물함 이용/총 (예: 14/68)
-  const frac = d.match(/(\d{1,4})\s*\/\s*(\d{1,4})/);
-  if(frac){ out.used = frac[1]; out.total = frac[2]; }
-
-  // 점유율 % (사물함이 없을 때 참고용)
-  const pm = d.match(/(\d{1,3})\s*%/);
-  if(pm) out.pct = Number(pm[1]);
-
-  // 조사일: displayName 뒤 6자리(260727) → 2026-07-27
-  const dm = d.match(/(?:^|[,\s])(\d{6})(?:\D|$)/);
-  if(dm){
-    const s = dm[1];
-    out.date = `20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`;
-  } else {
-    // memo 앞부분 YY-MM-DD
-    const mdate = mm.match(/(\d{2})-(\d{2})-(\d{2})/);
-    if(mdate) out.date = `20${mdate[1]}-${mdate[2]}-${mdate[3]}`;
-  }
-
-  // 브랜드 약칭: displayName 첫 토큰 (숫자·% 제외)
-  const bt = d.split(/[\s,]+/)[0];
-  if(bt && !/^\d/.test(bt) && !/폐업|폐점/.test(bt)) out.brand = bt;
-
-  // 점유율 이력 (memo에 ← 로 구분된 기록)
-  if(mm.includes('←')) out.history = mm;
-
-  return out;
-}
-
-let naverParsed = null;
-
-async function runNaverImport(apply){
-  const st = document.getElementById('naverImportStatus');
-  const fileEl = document.getElementById('naverJsonFile');
-  const file = fileEl && fileEl.files && fileEl.files[0];
-  if(!file){ st.textContent = 'JSON 파일을 먼저 선택해 주세요.'; return; }
-  if(!db || !fbUser){ st.textContent = '로그인이 필요해요.'; return; }
-
-  st.textContent = '파일을 읽는 중…';
-  let rows;
-  try{
-    rows = JSON.parse(await file.text());
-    if(!Array.isArray(rows)) throw new Error('배열이 아님');
-  }catch(e){ st.textContent = 'JSON을 읽을 수 없어요: ' + (e.message||''); return; }
-
-  // 1) 파싱 + 지역 분류
-  const byRegion = {}; const skipped = [];
-  rows.forEach(b=>{
-    const storeName = (b.name || b.displayName || '').trim();   // 정식 상호
-    const label = (b.displayName || '').trim();                  // 점유율 라벨
-    const addr = b.address || b.mappedAddress || '';
-    const p = parseNaverAddr(addr);
-    if(!storeName || !p){ skipped.push(storeName || addr || '(이름·주소 없음)'); return; }
-    (byRegion[p.region] = byRegion[p.region] || []).push({
-      name: storeName, label, dong: p.dong, addr,
-      sid: b.sid || '', lat: b.lat, lng: b.lng,
-      memo: b.memo || '', folder: b.folder || ''
-    });
-  });
-
-  const regionNames = Object.keys(byRegion).sort();
-  const totalOk = regionNames.reduce((a,r)=>a+byRegion[r].length,0);
-
-  // 2) 중복 판정 (기존 cafes와 대조)
-  const existBySid = new Map();
-  const existByName = new Set();
-  const existCoords = [];
-  cafes.forEach(c=>{
-    if(c.naverSid) existBySid.set(c.naverSid, c);
-    existByName.add((c.name||'').replace(/\s/g,''));
-    if(c.lat && c.lng) existCoords.push([c.lat, c.lng]);
-  });
-  const isDupe = it => {
-    if(it.sid && existBySid.has(it.sid)) return true;
-    if(existByName.has(it.name.replace(/\s/g,''))) return true;
-    if(it.lat && it.lng && existCoords.some(([la,ln])=> Math.abs(la-it.lat)<=0.0005 && Math.abs(ln-it.lng)<=0.0005)) return true;
-    return false;
-  };
-  let newCnt = 0, dupCnt = 0;
-  regionNames.forEach(r=> byRegion[r].forEach(it=>{ if(isDupe(it)) dupCnt++; else newCnt++; }));
-
-  const newRegions = regionNames.filter(rn=> !regions.some(r=>r.name===rn));
-
-  if(!apply){
-    naverParsed = byRegion;
-    st.innerHTML = `<b>미리보기</b> — 읽은 항목 ${rows.length}건<br>`
-      + `등록 대상 <b style="color:var(--teal)">${newCnt}건</b> · 중복 제외 ${dupCnt}건 · 주소 인식 실패 ${skipped.length}건<br>`
-      + `지역 ${regionNames.length}개 (신규 생성 ${newRegions.length}개)<br>`
-      + `<div style="max-height:140px;overflow:auto;margin-top:6px;font-size:12px;line-height:1.6;">`
-      + regionNames.map(r=>`${esc(r)} <b>${byRegion[r].length}</b>곳${newRegions.includes(r)?' <span style="color:var(--green)">신규</span>':''}`).join(' · ')
-      + `</div>`;
-    return;
-  }
-
-  // 3) 지역 생성
-  st.textContent = '지역을 만드는 중…';
-  const regionIdOf = {};
-  regions.forEach(r=> regionIdOf[r.name] = r.id);
-  let order = (regions.length + 1) * 10;
-  for(const rn of newRegions){
-    const id = 'r' + Date.now() + Math.random().toString(36).slice(2,6);
-    await db.collection('regions').doc(id).set({ id, name: rn, order: order += 10 });
-    regionIdOf[rn] = id;
-  }
-
-  // 4) 매장 배치 등록 (400건 단위)
-  let done = 0;
-  const queue = [];
-  regionNames.forEach(rn=>{
-    byRegion[rn].forEach(it=>{
-      if(isDupe(it)) return;
-      const m = parseNaverOcc(it.label, it.memo);
-      const docId = regionIdOf[rn] + '__nv_' + (it.sid || Math.random().toString(36).slice(2,10));
-      const memoParts = [];
-      if(it.label) memoParts.push(`라벨: ${it.label}`);
-      if(m.history) memoParts.push(`이력: ${m.history}`);
-      else if(it.memo) memoParts.push(it.memo);
-      queue.push([docId, {
-        id: docId, regionId: regionIdOf[rn],
-        name: it.name, dong: it.dong, brand: m.brand, addr: it.addr,
-        lat: it.lat ?? null, lng: it.lng ?? null,
-        naverSid: it.sid || '',
-        lockerUsed: m.used, lockerTotal: m.total, vendor: '미확인',
-        target: false, nonres: false, closed: m.closed,
-        lockerDate: m.date, memo: memoParts.join(' · '),
-        updatedBy: (fbUser&&fbUser.email)||'', updatedAt: Date.now()
-      }]);
-    });
-  });
-
-  for(let i=0;i<queue.length;i+=400){
-    const chunk = queue.slice(i, i+400);
-    const batch = db.batch();
-    chunk.forEach(([id, data])=> batch.set(db.collection('cafes').doc(id), data));
-    await batch.commit();
-    done += chunk.length;
-    st.textContent = `등록 중… ${done}/${queue.length}`;
-  }
-
-  st.innerHTML = `<b style="color:var(--green)">✅ 완료</b> — ${done}건 등록 · 중복 ${dupCnt}건 제외 · 지역 ${newRegions.length}개 신규 생성`;
-  notify(`네이버 책갈피 ${done}건을 등록했어요.`);
-}
-
-/* ═══════════════════════════════════════════════════════════
-   매장명 중복 확인
-   같은 브랜드의 다른 지점(르하임 A점 / 르하임 B점)은 정상이므로
-   막지 않고 "확인 바랍니다" 안내만 띄웁니다.
-   ═══════════════════════════════════════════════════════════ */
-
-/* 매장명에서 업종 표현과 공백을 걷어내 비교용 문자열을 만듭니다. */
-function cafeKey(s){
-  return String(s || '')
-    .replace(/\s+/g, '')
-    .replace(/스터디카페|스터디까페|스터디센터|스터디룸|독서실|스터디/g, '')
-    .replace(/[()\[\]\-_.·,]/g, '')
-    .toLowerCase();
-}
-/* 끝에 붙은 '점' 표기 차이를 없앱니다.
-   "르하임화성병점" 과 "르하임화성병점점" 을 같은 것으로 봅니다. */
-function cafeCore(s){
-  return cafeKey(s).replace(/점+$/, '');
-}
-/* 두 문자열이 앞에서 몇 글자까지 같은지 셉니다. */
-/* 브랜드를 알아냅니다. 브랜드 칸이 비어 있으면 매장명 앞부분에서 뽑습니다.
-   "초심스터디카페 남양주오남점" → "초심" */
-function brandOf(o){
-  const b = cafeKey(o && o.brand);
-  if(b.length >= 2) return b;
-  const raw = String((o && o.name) || '').trim();
-  const head = raw.split(/스터디카페|스터디까페|독서실|스터디센터|스터디룸|스터디|\s+/)[0];
-  return cafeKey(head);
-}
-/* 지점 이름만 남깁니다. 브랜드와 끝의 '점' 한 글자를 걷어냅니다.
-   "초심스터디카페 남양주오남점" → "남양주오남"
-   "르하임 화성병점점" → "화성병점" (지명 '병점'의 점은 남겨야 합니다) */
-function branchOf(o){
-  let k = cafeKey(o && o.name);
-  const b = brandOf(o);
-  if(b && k.startsWith(b)) k = k.slice(b.length);
-  return k.replace(/점$/, '');
-}
-/* 주소를 비교용으로 다듬습니다. */
-function addrKey(s){
-  return String(s || '').replace(/\s+/g, '').replace(/[()\-]/g, '');
-}
-/* 지금 입력한 내용과 "같은 지점"으로 보이는 매장을 찾습니다.
-
-   같은 브랜드의 다른 지점은 정상입니다. 실제로 초심 다산지금점과 다산가운점이
-   같은 다산동에 함께 있습니다. 그래서 브랜드나 동이 같다는 이유로는 알리지 않고,
-   아래 세 경우만 같은 지점으로 봅니다.
-
-   kind: 'name'   = 매장명이 사실상 같음
-         'addr'   = 주소가 같음 (같은 건물)
-         'branch' = 브랜드가 같고 지점명이 서로 포함 관계
-                    ("초심 남양주오남점" 과 "초심 오남점") */
-function findDupCafes(name, excludeId){
-  const key  = cafeKey(name);
-  const core = cafeCore(name);
-  if(key.length < 2) return [];
-  const gv = id => (document.getElementById(id)?.value || '').trim();
-  const me = { name, brand: gv('cf_brand') };
-  const myBrand  = brandOf(me);
-  const myBranch = branchOf(me);
-  const myAddr   = addrKey(gv('cf_addr'));
-  const out = [];
-  cafes.forEach(c => {
-    if(!c || c.id === excludeId) return;
-    const cKey = cafeKey(c.name);
-    if(!cKey) return;
-    const sameRegion = c.regionId === svRegionId;
-
-    // 1) 매장명이 사실상 같음 — 지역과 무관하게 알려 줍니다
-    if(cKey === key || (core.length >= 2 && cafeCore(c.name) === core)){
-      out.push({ c, kind:'name', sameRegion }); return;
-    }
-    if(!sameRegion) return;
-
-    // 2) 주소가 같음 — 같은 건물이면 이름이 달라도 같은 곳입니다
-    if(myAddr.length >= 8 && addrKey(c.addr) === myAddr){
-      out.push({ c, kind:'addr', sameRegion }); return;
-    }
-
-    // 3) 브랜드가 같고, 지점명 한쪽이 다른 쪽을 품고 있음
-    if(myBrand.length >= 2 && brandOf(c) === myBrand){
-      const cb = branchOf(c);
-      const short = myBranch.length <= cb.length ? myBranch : cb;
-      const long  = myBranch.length <= cb.length ? cb : myBranch;
-      if(short.length >= 2 && long.includes(short)){
-        out.push({ c, kind:'branch', sameRegion });
-      }
-    }
-  });
-  const rank = { name:0, addr:1, branch:2 };
-  return out.sort((a,b)=> rank[a.kind] - rank[b.kind]).slice(0, 6);
-}
-/* 매장명·동·주소를 입력하는 동안 바로 안내를 띄웁니다. */
-function checkDupHint(){
-  const el = document.getElementById('cf_dupHint');
-  const input = document.getElementById('cf_name');
-  if(!el || !input) return;
-  cafeDupConfirmed = false;
-  const btn = document.querySelector('#cafeModal .cm-save');
-  if(btn) btn.textContent = '저장';
-
-  const hits = findDupCafes(input.value.trim(), cafeEditId);
-  if(!hits.length){ el.style.display = 'none'; el.innerHTML = ''; return; }
-
-  const REASON = {
-    name: '매장명이 같습니다',
-    addr: '주소가 같습니다',
-    branch: '같은 브랜드의 같은 지점으로 보입니다'
-  };
-  const rows = hits.map(h => {
-    const c = h.c;
-    const occ = (c.lockerUsed !== '' && c.lockerTotal)
-      ? ` · 점유율 ${Math.round(c.lockerUsed / c.lockerTotal * 100)}%` : '';
-    const where = h.sameRegion ? (c.dong || '') : '다른 지역';
-    return `<div style="font-size:12.5px;padding:4px 0;">
-      🔴 <b>${esc(c.name)}</b>
-      <span style="color:var(--sub);">${esc(where)}${esc(c.vendor && c.vendor !== '미확인' ? ' · ' + c.vendor : '')}${occ}</span>
-      <div style="font-size:11.5px;color:var(--sub);">${REASON[h.kind] || ''}</div>
-    </div>`;
-  }).join('');
-
-  el.style.display = 'block';
-  el.innerHTML = `<div style="border:1px solid var(--red);border-radius:8px;padding:10px;background:var(--card);">
-    <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:6px;">
-      ⚠️ 이미 등록되어 진 지점으로 확인됩니다. 확인 바랍니다
-    </div>
-    ${rows}
-    <div style="font-size:11.5px;color:var(--sub);margin-top:6px;">
-      같은 지점이라면 기존 매장을 열어 수정해 주세요.
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">
+      <div style="font-size:11.5px;color:var(--sub);margin-bottom:6px;">아래 두 칸은 매장명·주소에서 자동으로 채워집니다. 검색·지도·중복 확인에 쓰이니 비워두지 마세요.</div>
+      <div class="grid2">
+        <div class="field"><label>동/지역</label><input id="cf_dong" class="inline-input" value="${esc(c?.dong||'')}" placeholder="주소 입력 시 자동" oninput="this.dataset.touched='1';checkDupHint()"></div>
+        <div class="field"><label>브랜드</label><input id="cf_brand" class="inline-input" value="${esc(c?.brand||'')}" placeholder="매장명 입력 시 자동" oninput="this.dataset.touched='1';checkDupHint()"></div>
+      </div>
     </div>
   </div>`;
 }
-let cafeDupConfirmed = false;
+
+/* 사물함 3칸 자동 계산 — 전체 개수가 있으면 나머지 한 칸을 채웁니다. */
+function lockerCalc(src){
+  const el = id => document.getElementById(id);
+  const num = id => { const v = (el(id)?.value || '').replace(/[^0-9]/g,''); return v === '' ? null : Number(v); };
+  const lu = el('cf_lu'), lf = el('cf_lf');
+  let U = num('cf_lu'), F = num('cf_lf'), T = num('cf_lt');
+
+  if(T !== null){
+    if(src === 'lf' && F !== null){ F = Math.min(F, T); U = T - F; if(lf) lf.value = F; if(lu) lu.value = U; }
+    else if(src === 'lu' && U !== null){ U = Math.min(U, T); F = T - U; if(lu) lu.value = U; if(lf) lf.value = F; }
+    else if(src === 'lt'){
+      if(U !== null){ U = Math.min(U, T); F = T - U; if(lu) lu.value = U; if(lf) lf.value = F; }
+      else if(F !== null){ F = Math.min(F, T); U = T - F; if(lf) lf.value = F; if(lu) lu.value = U; }
+    }
+  }
+
+  const box = el('cf_occ');
+  if(box){
+    if(T && T > 0 && U !== null){
+      const pct = Math.round(U / T * 100);
+      const color = pct >= 60 ? 'var(--green)' : pct >= 30 ? 'var(--amber, #B8860B)' : 'var(--red)';
+      box.innerHTML = `점유율 <b style="color:${color};font-size:14px;">${pct}%</b> <span style="color:var(--sub);">이용 ${U} · 빈 자리 ${T-U} · 전체 ${T}</span>`
+        + (pct <= 20 ? ' <span style="color:var(--sub);">→ 비상주 추천 대상</span>' : '');
+    }else{
+      box.innerHTML = '<span style="color:var(--sub);">전체 개수와 함께 이용 중 또는 빈 자리를 넣으면 점유율이 계산됩니다.</span>';
+    }
+  }
+  markSurveyedToday();
+}
+
+/* 매장명에서 브랜드를 자동으로 채웁니다. */
+function onCafeNameInput(){
+  const nameEl = document.getElementById('cf_name');
+  const brandEl = document.getElementById('cf_brand');
+  if(brandEl && !brandEl.dataset.touched){
+    const raw = (nameEl?.value || '').trim();
+    const head = raw.split(/스터디카페|스터디까페|독서실|스터디센터|스터디룸|스터디|\s+/)[0].trim();
+    if(head.length >= 1) brandEl.value = head;   // '랭' 처럼 한 글자 브랜드도 있습니다
+  }
+  checkDupHint();
+}
+
+/* 주소에서 동·읍·면을 뽑아 자동으로 채웁니다. */
+function dongFromAddr(addr){
+  const m = String(addr || '').match(/[가-힣]+(?:동|읍|면|가|리)(?=\s|$|[0-9])/g);
+  return m ? m[m.length - 1] : '';   // 시·군·구가 앞에 오므로 마지막 것이 실제 동입니다
+}
+function onCafeAddrInput(){
+  const addrEl = document.getElementById('cf_addr');
+  const dongEl = document.getElementById('cf_dong');
+  if(dongEl && !dongEl.dataset.touched){
+    const d = dongFromAddr(addrEl?.value);
+    if(d) dongEl.value = d;
+  }
+  checkDupHint();
+}
 
 /* 사물함 칸을 입력하면 "오늘 조사"로 자동 표시합니다. */
 function markSurveyedToday(){
@@ -3985,6 +3644,11 @@ function openCafeModal(c){
   if(sv) sv.textContent = '저장';
   cafeDupConfirmed = false;
   wrap.style.display = 'flex';
+  // 기존 매장의 동·브랜드는 자동 채움이 건드리지 않게 보호합니다
+  if(c?.dong)  { const el = document.getElementById('cf_dong');  if(el) el.dataset.touched = '1'; }
+  if(c?.brand) { const el = document.getElementById('cf_brand'); if(el) el.dataset.touched = '1'; }
+  lockerCalc('');            // 점유율 줄을 바로 표시
+  if(document.getElementById('cf_dateToday')) document.getElementById('cf_dateToday').checked = !c?.lockerDate;
   if(c) checkDupHint(); // 수정 화면에서도 겹치는 매장이 있으면 알려 줍니다
 }
 function closeCafeModal(){ document.getElementById('cafeModal').style.display='none'; cafeEditId=null; }
