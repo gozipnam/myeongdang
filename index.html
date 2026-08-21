@@ -66,6 +66,12 @@
   .b-vendor2{color:#fff;}
   .b-plain{background:var(--bg);color:var(--sub);}
   .occ-row{display:flex;align-items:baseline;gap:8px;margin-top:10px;}
+  .hist-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;align-items:center;}
+  .hist-chip{font-size:11px;color:var(--sub);background:rgba(0,0,0,.05);border-radius:5px;padding:2px 6px;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .hist-chip.hi{color:#CE4A36;background:#FAE8E4;font-weight:700;}
+  .hist-lbl{font-size:11px;color:var(--sub);}
+  .v-card.peak85{box-shadow:inset 3px 0 0 #CE4A36, 0 0 0 1px rgba(206,74,54,.28);}
+  .badge2.b-peak{background:#CE4A36;color:#fff;}
   .occ-row b{font-size:20px;font-variant-numeric:tabular-nums;}
   .occ-row span{font-size:12px;color:var(--sub);}
   .sv-crumb{font-size:13px;color:var(--sv-target);font-weight:700;cursor:pointer;margin-bottom:12px;display:inline-block;}
@@ -1461,7 +1467,7 @@ function repairAndParse(raw){
    ═══════════════════════════════════════════════════════════ */
 /* 배포된 파일이 최신인지 확인하는 표시입니다.
    브라우저 콘솔에 MD_VERSION 을 입력하면 바로 볼 수 있습니다. */
-const MD_VERSION = 'v8 · 2026-07-30 · 삭제함수 복원·경쟁업체 통합';
+const MD_VERSION = 'v9 · 2026-07-30 · 정렬필터·조사이력·검색폴백';
 try{ window.MD_VERSION = MD_VERSION; console.log('명당 ' + MD_VERSION); }catch(_){}
 
 const AI_PROXY_URL  = 'https://myeongdang-ai.yjyu.workers.dev';
@@ -1484,7 +1490,9 @@ async function askClaude(prompt, opts){
 
   const messages = [{ role: "user", content: prompt }];
   let lastText = '', allText = '';
+  let useTools = tools;   // 웹검색이 거절되면 없이 재시도합니다
 
+  aiNoSearch = false;
   // 검색이 길어지면 API 가 stop_reason:"pause_turn" 으로 턴을 끊습니다.
   // 그때는 받은 응답을 그대로 되돌려 보내 이어서 진행해야 합니다.
   for(let turn = 0; turn < 4; turn++){
@@ -1495,7 +1503,7 @@ async function askClaude(prompt, opts){
         model: viaProxy ? "claude-sonnet-5" : "claude-sonnet-4-6",
         max_tokens: viaProxy ? 8000 : 1000,
         messages,
-        tools
+        tools: useTools
       })
     });
     if(!res.ok){
@@ -1512,6 +1520,13 @@ async function askClaude(prompt, opts){
       lastAiError = `HTTP ${res.status}` + (detail ? ` — ${String(detail).slice(0,400)}` : '')
                     + ` [경로: ${viaProxy ? '심부름꾼 서버' : '클로드 직접'}] [${MD_VERSION}]`;
       console.error('askClaude 실패:', lastAiError);
+      // 웹검색 때문에 거절된 것으로 보이면, 검색 없이 한 번 더 시도합니다.
+      if(useTools && (res.status === 403 || res.status === 400)){
+        console.warn('웹검색 없이 재시도합니다.');
+        aiNoSearch = true;
+        useTools = undefined;
+        continue;
+      }
       if(res.status === 401 || res.status === 403) throw new Error('auth');
       if(res.status === 429) throw new Error('http 429');
       throw new Error('http ' + res.status);
@@ -1531,6 +1546,7 @@ async function askClaude(prompt, opts){
 }
 let lastAiError = '';
 let lastAiStop = '';
+let aiNoSearch = false;   // 웹검색 없이 처리됐는지
 /* 응답 텍스트에서 JSON 객체({...})를 꺼냅니다. */
 function extractObject(text){
   const clean = String(text || '').replace(/```json|```/g, '').trim();
@@ -1696,6 +1712,7 @@ async function autoResearch(){
         researchLocEval.consumer_flow ? `소비자 동선 ${researchLocEval.consumer_flow}` : ''
       ].filter(Boolean).join(' · ')}<br>`:''}
       ${r.note ? '<span style="color:var(--sub);">' + esc(r.note) + '</span><br>' : ''}
+      ${aiNoSearch ? '<div style="margin-top:6px;padding:6px 8px;border-radius:6px;background:var(--sv-warn-bg);font-size:12px;">⚠️ 웹검색을 쓸 수 없어 <b>모델 기억만으로 추정</b>했습니다. 최신 정보가 아닐 수 있으니 현장·지도에서 반드시 확인하세요.</div>' : ''}
       ${researchSignals.length ? '<div style="margin-top:8px;"><b>🤖 AI 체크</b></div>' + researchSignals.map(g=>`<div class="ai-sig ${g.type==='warn'?'warn':'good'}">${g.type==='warn'?'⚠️':'💡'} ${esc(g.text)}</div>`).join('') : ''}
       <span style="color:var(--sub);">숫자가 폼에 입력됐어요. 저장하면 상권·입지 평가와 ${cafes.length ? '경쟁업체 목록, ' : ''}AI 체크가 함께 기록됩니다. 웹검색 기반 추정이므로 현장·지도에서 꼭 확인하세요.</span>`;
   }catch(e){
@@ -3035,6 +3052,53 @@ function startGeoWatch(){
 startGeoWatch();
 let cafeEditId = null;
 
+/* ── 조사 목록 정렬 ── */
+let svSort = 'dist';   // dist=가까운 순 | recent=최근 조사순 | old=오래된 조사순 | occ=점유율 높은 순
+const SV_SORTS = [
+  ['dist','📍 가까운 순'], ['recent','🕘 최근 조사순'],
+  ['old','⏳ 오래된 조사순'], ['occ','📊 점유율 높은 순']
+];
+function setSvSort(v){ svSort = v; renderSurvey(); }
+function svSortLabel(){
+  const f = SV_SORTS.find(x=>x[0]===svSort);
+  const noLoc = (svSort === 'dist' && !(myLat && myLng));
+  return (f ? f[1] : '') + (noLoc ? ' (위치 없음 → 점유율 순)' : '');
+}
+function sortCafeList(list){
+  const hasLoc = myLat && myLng;
+  if(hasLoc) list.forEach(c=>{ c._dist = (c.lat && c.lng) ? haversine(myLat, myLng, c.lat, c.lng) : 99999; });
+  const dnum = c => { const d = (c.lockerDate||'').replace(/-/g,''); return d ? Number(d) : null; };
+  if(svSort === 'recent')      list.sort((a,b)=> (dnum(b) ?? -1) - (dnum(a) ?? -1));
+  else if(svSort === 'old')    list.sort((a,b)=> (dnum(a) ?? 99999999) - (dnum(b) ?? 99999999));
+  else if(svSort === 'occ')    list.sort((a,b)=> (occOf(b) ?? -1) - (occOf(a) ?? -1));
+  else if(hasLoc)              list.sort((a,b)=> a._dist - b._dist);
+  else                         list.sort((a,b)=> (occOf(b) ?? -1) - (occOf(a) ?? -1));
+  return list;
+}
+
+/* ── 조사 이력 ──
+   저장할 때마다 직전 값이 history 에 쌓입니다. [{d:'2024-11-05', u:27, t:50, o:54}, ...] */
+function histOf(c){ return Array.isArray(c && c.history) ? c.history : []; }
+/* 현재 + 과거를 통틀어 가장 높았던 점유율 */
+function histPeak(c){
+  const vals = histOf(c).map(h=>h.o).filter(x=>x!=null);
+  const cur = occOf(c);
+  if(cur != null) vals.push(cur);
+  return vals.length ? Math.max(...vals) : null;
+}
+/* 카드에 붙일 이력 줄 (yy-mm-dd OO%) */
+function histLineHTML(c, max){
+  const h = histOf(c);
+  if(!h.length) return '';
+  const n = max || 4;
+  return `<div class="hist-row"><span class="hist-lbl">이전</span>${
+    h.slice(0, n).map(x=>{
+      const hi = x.o != null && x.o >= 85;
+      return `<span class="hist-chip${hi?' hi':''}">${esc(String(x.d||'').slice(2))} ${x.o!=null?x.o+'%':'—'}</span>`;
+    }).join('')
+  }${h.length > n ? `<span class="hist-lbl">+${h.length-n}</span>` : ''}</div>`;
+}
+
 function occOf(c){
   const t = parseInt(c.lockerTotal,10), u = parseInt(c.lockerUsed,10);
   return (t>0 && !isNaN(u) && u>=0) ? Math.min(100, Math.round(u/t*100)) : null;
@@ -3283,18 +3347,12 @@ function renderCafeList(v){
     const q = svCafeQuery.trim().toLowerCase();
     list = list.filter(c=> (c.name||'').toLowerCase().includes(q) || (c.dong||'').toLowerCase().includes(q) || (c.brand||'').toLowerCase().includes(q) || (c.vendor||'').toLowerCase().includes(q));
   }
-  // 위치 기반 정렬 (가까운 순) 또는 점유율 순
-  const sortByLoc = myLat && myLng;
-  if(sortByLoc){
-    list.forEach(c=>{ c._dist = (c.lat&&c.lng) ? haversine(myLat,myLng,c.lat,c.lng) : 99999; });
-    list.sort((a,b)=> a._dist - b._dist);
-  } else {
-    list.sort((a,b)=> (occOf(b) ?? -1) - (occOf(a) ?? -1));
-  }
+  const sortByLoc = !!(myLat && myLng);
+  sortCafeList(list);
 
   const done = cafes.filter(c=>c.regionId===svRegionId).map(occOf).filter(x=>x!=null).length;
   const cnt = cafes.filter(c=>c.regionId===svRegionId).length;
-  const sortLabel = sortByLoc ? '📍 가까운 순 정렬' : '점유율 높은 순 정렬';
+  const sortLabel = svSortLabel();
 
   v.innerHTML = `
     <div class="sv-crumb" onclick="closeRegion()">← 지역 목록</div>
@@ -3318,6 +3376,10 @@ function renderCafeList(v){
       <p style="color:var(--sub);margin-bottom:14px;">아직 등록된 매장이 없어요.<br>자동 검색으로 이 지역의 스터디카페를 한 번에 불러올 수 있어요.</p>
       <button class="btn btn-primary" onclick="startAutoSearch()">🔍 스터디카페 자동 검색</button>
     </div>` : ''}
+    <div class="toolbar" style="margin-bottom:6px;">
+      <span style="font-size:12px;color:var(--sub);align-self:center;margin-right:2px;">정렬</span>
+      ${SV_SORTS.map(([v,lbl])=>`<button class="chip ${svSort===v?'active':''}" onclick="setSvSort('${v}')">${lbl}</button>`).join('')}
+    </div>
     <div class="toolbar">
       <button class="chip ${svFilter==='all'?'active':''}" onclick="setSvFilter('all')">전체</button>
       <button class="chip ${svFilter==='target'?'active':''}" onclick="setSvFilter('target')">⭐ 전환 타깃</button>
@@ -3340,12 +3402,17 @@ function renderCafeList(v){
         ? `<span class="badge2 b-vendor2" style="background:${VENDOR_COLOR[c.vendor]||'#8A8F98'}">${esc(vendorTag(c.vendor))}</span>` : '';
       const occBadge = c.closed ? '<span class="badge2" style="background:#2B2B2B;color:#fff;">폐업</span>'
         : o!=null ? `<span class="badge2" style="background:${o>=80?'#FAE8E4':o>=60?'var(--sv-target-bg)':'var(--sv-warn-bg)'};color:${statusCol};">점유율 ${o}%${o>=80?' 🔴':''}</span>` : '';
-      return `<div class="v-card" style="border-left:4px solid ${statusCol};${c.closed?'opacity:.6;':''}" onclick="editCafe('${c.id}')">
+      const peak = histPeak(c);
+      const isPeak85 = peak != null && peak >= 85 && !c.closed;
+      const peakBadge = (isPeak85 && (o == null || peak > o)) ? `<span class="badge2 b-peak">🔥 최고 ${peak}%</span>` : '';
+      return `<div class="v-card${isPeak85?' peak85':''}" style="border-left:4px solid ${statusCol};${c.closed?'opacity:.6;':''}" onclick="editCafe('${c.id}')">
         <div class="v-name">${c.target?'<span class="star">⭐</span>':''}${esc(c.name)}${(sortByLoc && c._dist!=null && c._dist<99999)?`<span style="font-size:11px;color:var(--sub);margin-left:6px;">📍 ${c._dist<1000?Math.round(c._dist)+'m':(c._dist/1000).toFixed(1)+'km'}</span>`:''}${c.closed?' <span style="font-size:12px;color:#2B2B2B;font-weight:700;">(폐업)</span>':''}</div>
         <div class="v-sub">${esc(c.dong||'')}${c.brand?` · ${esc(c.brand)}`:''}${c.lockerDate?` · 조사 ${esc(c.lockerDate)}`:''}</div>
         ${o!=null&&!c.closed?`<div class="occ-row"><b style="color:${statusCol}">${o}%</b><span>사물함 ${esc(c.lockerUsed)}/${esc(c.lockerTotal)}</span></div>`:''}
+        ${histLineHTML(c)}
         <div class="v-badges">
           ${occBadge}
+          ${peakBadge}
           ${nonres?'<span class="badge2 b-nr">🏠 비상주 추천</span>':''}
           ${c.target?'<span class="badge2 b-occ-hi">⭐ 고스카 전환</span>':''}
           ${vendorBadge}
@@ -3383,13 +3450,7 @@ function updateCafeListOnly(){
     const q = svCafeQuery.trim().toLowerCase();
     list = list.filter(c=> (c.name||'').toLowerCase().includes(q) || (c.dong||'').toLowerCase().includes(q) || (c.brand||'').toLowerCase().includes(q) || (c.vendor||'').toLowerCase().includes(q));
   }
-  // 위치 기반 정렬 (가까운 순)
-  if(myLat && myLng){
-    list.forEach(c=>{ c._dist = (c.lat&&c.lng) ? haversine(myLat,myLng,c.lat,c.lng) : 99999; });
-    list.sort((a,b)=> a._dist - b._dist);
-  } else {
-    list.sort((a,b)=> (occOf(b) ?? -1) - (occOf(a) ?? -1));
-  }
+  sortCafeList(list);
   // 기존 카드들 제거
   parent.querySelectorAll('.v-card, .empty').forEach(el=>el.remove());
   // 새 카드 삽입
@@ -3406,11 +3467,15 @@ function updateCafeListOnly(){
     const occBadge = c.closed ? '<span class="badge2" style="background:#2B2B2B;color:#fff;">폐업</span>'
       : o!=null ? `<span class="badge2" style="background:${o>=80?'#FAE8E4':o>=60?'var(--sv-target-bg)':'var(--sv-warn-bg)'};color:${statusCol};">점유율 ${o}%${o>=80?' 🔴':''}</span>` : '';
     const distLabel = (myLat && c._dist!=null && c._dist<99999) ? `<span style="font-size:11px;color:var(--sub);margin-left:6px;">📍 ${c._dist<1000?Math.round(c._dist)+'m':(c._dist/1000).toFixed(1)+'km'}</span>` : '';
-    return `<div class="v-card" style="border-left:4px solid ${statusCol};${c.closed?'opacity:.6;':''}" onclick="editCafe('${c.id}')">
+    const peak = histPeak(c);
+    const isPeak85 = peak != null && peak >= 85 && !c.closed;
+    const peakBadge = (isPeak85 && (o == null || peak > o)) ? `<span class="badge2 b-peak">🔥 최고 ${peak}%</span>` : '';
+    return `<div class="v-card${isPeak85?' peak85':''}" style="border-left:4px solid ${statusCol};${c.closed?'opacity:.6;':''}" onclick="editCafe('${c.id}')">
       <div class="v-name">${c.target?'<span class="star">⭐</span>':''}${esc(c.name)}${distLabel}${c.closed?' <span style="font-size:12px;color:#2B2B2B;font-weight:700;">(폐업)</span>':''}</div>
       <div class="v-sub">${esc(c.dong||'')}${c.brand?` · ${esc(c.brand)}`:''}${c.lockerDate?` · 조사 ${esc(c.lockerDate)}`:''}</div>
       ${o!=null&&!c.closed?`<div class="occ-row"><b style="color:${statusCol}">${o}%</b><span>사물함 ${esc(c.lockerUsed)}/${esc(c.lockerTotal)}</span></div>`:''}
-      <div class="v-badges">${occBadge}${nonres?'<span class="badge2 b-nr">🏠 비상주 추천</span>':''}${c.target?'<span class="badge2 b-occ-hi">⭐ 고스카 전환</span>':''}${vendorBadge}</div>
+      ${histLineHTML(c)}
+      <div class="v-badges">${occBadge}${peakBadge}${nonres?'<span class="badge2 b-nr">🏠 비상주 추천</span>':''}${c.target?'<span class="badge2 b-occ-hi">⭐ 고스카 전환</span>':''}${vendorBadge}</div>
     </div>`;
   }).join('');
   parent.insertAdjacentHTML('beforeend', cardsHTML);
@@ -3603,6 +3668,7 @@ function cafeFormHTML(c){
         </label>
       </div>
       <div style="font-size:11.5px;color:var(--sub);margin-top:4px;">사물함 수를 입력하면 자동으로 체크됩니다. 값이 지난번과 같아도 조사일은 오늘로 기록됩니다.</div>
+      ${histLineHTML(c, 8)}
     </div>
 
     <div class="grid2" style="margin-top:8px;">
@@ -4183,6 +4249,17 @@ async function saveCafe(){
   if(lu === '' && lt === '') lockerDateVal = '';
   else if(markToday || lockerChanged) lockerDateVal = todayStr;
   else if(!lockerDateVal) lockerDateVal = todayStr;
+  // 조사일이 바뀌면 직전 값을 이력으로 남깁니다 (최대 12건)
+  let hist = Array.isArray(prev?.history) ? prev.history.slice() : [];
+  if(prev && prev.lockerDate && prev.lockerDate !== lockerDateVal
+     && prev.lockerUsed !== '' && prev.lockerUsed != null && prev.lockerTotal){
+    const po = Math.round(Number(prev.lockerUsed) / Number(prev.lockerTotal) * 100);
+    if(!hist.some(x => x.d === prev.lockerDate)){
+      hist.unshift({ d: prev.lockerDate, u: Number(prev.lockerUsed), t: Number(prev.lockerTotal), o: po });
+    }
+    hist = hist.slice(0, 12);
+  }
+
   // 주소가 새로 입력·변경되면 좌표 자동 변환
   let lat = prev?.lat ?? null, lng = prev?.lng ?? null;
   if(addr && (!prev || prev.addr !== addr || !prev.lat)){
@@ -4199,6 +4276,7 @@ async function saveCafe(){
     closed: document.getElementById('cf_closed').checked,
     nonres: prev?.nonres||false,
     lockerDate: lockerDateVal,
+    history: hist,
     memo: g('cf_memo').trim(),
     updatedBy: (fbUser&&fbUser.email)||'', updatedAt: Date.now()
   };
