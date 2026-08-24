@@ -1467,7 +1467,7 @@ function repairAndParse(raw){
    ═══════════════════════════════════════════════════════════ */
 /* 배포된 파일이 최신인지 확인하는 표시입니다.
    브라우저 콘솔에 MD_VERSION 을 입력하면 바로 볼 수 있습니다. */
-const MD_VERSION = 'v11 · 2026-07-30 · 행정구역 지도·시군구 230개';
+const MD_VERSION = 'v12 · 2026-07-30 · 지도 정렬·빈 지역 삭제';
 try{ window.MD_VERSION = MD_VERSION; console.log('명당 ' + MD_VERSION); }catch(_){}
 
 const AI_PROXY_URL  = 'https://myeongdang-ai.yjyu.workers.dev';
@@ -3345,7 +3345,10 @@ function regionGroupsHTML(){
           const pct = cnt ? Math.round(done/cnt*100) : 0;
           const short = r.name.replace(prov,'').trim();
           return `<div class="region" onclick="openRegion('${r.id}')">
-            <div class="r-top"><div class="r-name">${esc(short||r.name)}${r.tag?`<small>${esc(r.tag)}</small>`:''}</div><div class="r-count">${cnt}곳</div></div>
+            <div class="r-top"><div class="r-name">${esc(short||r.name)}${r.tag?`<small>${esc(r.tag)}</small>`:''}</div>
+              ${cnt===0
+                ? `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:var(--red);" title="매장이 없는 지역 지우기" onclick="deleteEmptyRegion('${r.id}', event)">✕ 삭제</button>`
+                : `<div class="r-count">${cnt}곳</div>`}</div>
             ${r.districts?`<div class="r-districts">${esc(r.districts)}</div>`:''}
             <div class="r-progress">
               <div class="r-prow"><span>사물함 점유율 조사</span><b>${done}/${cnt}</b></div>
@@ -3647,14 +3650,22 @@ function addRegionFromQuery(){
    시도 블록은 실제 위치를 본떠 배치한 도식이며 정확한 국경선은 아닙니다. */
 let regionMapOpen = false, pickedSido = '';
 
-/* 시도 블록 배치 (x, y, 너비, 높이) */
+/* 시도 블록 배치 — 4열 격자에 맞춰 행을 나란히 정렬합니다.
+   열 x: 12 / 82 / 152 / 222 (너비 64, 2열 걸침 134)
+   행 y: 20 / 68 / 116 / 164 / 212 / 260 (높이 42) */
 const SIDO_BOX = {
-  '인천': [14, 44, 58, 36],   '서울': [78, 44, 62, 36],   '강원': [146, 30, 140, 88],
-  '경기': [14, 86, 126, 58],  '충북': [146, 124, 76, 58], '경북': [228, 124, 58, 120],
-  '충남': [14, 150, 74, 64],  '세종': [94, 150, 46, 30],  '대전': [94, 184, 46, 30],
-  '대구': [146, 188, 76, 40], '전북': [14, 220, 126, 54], '경남': [146, 234, 76, 62],
-  '울산': [228, 250, 58, 36], '전남': [14, 280, 92, 78],  '광주': [112, 280, 28, 50],
-  '부산': [228, 292, 58, 36], '제주': [14, 372, 92, 34]
+  // 인천 · 서울 · 강원
+  '인천': [ 12,  20,  64, 42], '서울': [ 82,  20,  64, 42], '강원': [152,  20, 134, 42],
+  // 경기 · 충북 · 경북
+  '경기': [ 12,  68, 134, 42], '충북': [152,  68,  64, 42], '경북': [222,  68,  64, 42],
+  // 충남 · 세종 · 대전 · 대구
+  '충남': [ 12, 116,  64, 42], '세종': [ 82, 116,  64, 42], '대전': [152, 116,  64, 42], '대구': [222, 116,  64, 42],
+  // 전북 · 울산
+  '전북': [ 12, 164, 134, 42], '울산': [222, 164,  64, 42],
+  // 전남 · 광주 · 경남 · 부산
+  '전남': [ 12, 212,  64, 42], '광주': [ 82, 212,  64, 42], '경남': [152, 212,  64, 42], '부산': [222, 212,  64, 42],
+  // 제주
+  '제주': [ 12, 260,  64, 42]
 };
 
 function toggleRegionMap(){
@@ -3675,6 +3686,19 @@ function pickGu(sido, gu){
   if(confirm(`"${full}" 는 아직 등록되지 않았어요.\n\n지금 추가할까요?`)) createRegionByName(full);
 }
 
+/* 매장이 하나도 없는 지역만 지웁니다. 데이터가 있으면 막습니다. */
+async function deleteEmptyRegion(id, ev){
+  if(ev) ev.stopPropagation();
+  const r = regions.find(x=>x.id===id); if(!r) return;
+  const n = cafes.filter(c=>c.regionId===id).length;
+  if(n > 0){ notify(`"${r.name}" 에는 매장 ${n}곳이 있어 지울 수 없어요.`); return; }
+  if(!confirm(`"${r.name}" 지역을 목록에서 지울까요?\n\n등록된 매장이 없어 잃을 데이터는 없습니다.`)) return;
+  try{
+    await db.collection('regions').doc(id).delete();
+    notify(`${r.name} 을(를) 지웠어요.`);
+  }catch(e){ notify('삭제 실패: ' + (e.message||'')); }
+}
+
 /* 시도별로 등록된 시군구 수 */
 function sidoDoneCount(sido){
   const list = SIDO_GUS[sido] || [];
@@ -3686,14 +3710,14 @@ function sidoMapHTML(){
     const [x,y,w,h] = SIDO_BOX[sido];
     const done = sidoDoneCount(sido);
     const on = pickedSido === sido;
-    const fill = on ? 'var(--teal, #0F6B5C)' : done ? 'rgba(15,107,92,.14)' : 'rgba(0,0,0,.05)';
+    const fill = on ? 'var(--teal, #0F6B5C)' : done ? 'rgba(15,107,92,.16)' : 'rgba(0,0,0,.045)';
     const txt  = on ? '#fff' : 'var(--fg, #1F1F1F)';
-    return `<g class="sido-hit" style="cursor:pointer;" onclick="pickSido('${sido}')">
-      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7" fill="${fill}" stroke="${on?'var(--teal,#0F6B5C)':'rgba(0,0,0,.18)'}" stroke-width="${on?2:1}"/>
-      <text x="${x+w/2}" y="${y+h/2-(done?5:0)}" text-anchor="middle" dominant-baseline="central"
-            font-size="13" font-weight="700" fill="${txt}">${sido}</text>
-      ${done?`<text x="${x+w/2}" y="${y+h/2+11}" text-anchor="middle" dominant-baseline="central"
-            font-size="10.5" fill="${on?'rgba(255,255,255,.85)':'var(--sub,#6B6B6B)'}">${done}곳 조사중</text>`:''}
+    return `<g style="cursor:pointer;" onclick="pickSido('${sido}')">
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="${fill}"
+            stroke="${on?'var(--teal,#0F6B5C)':'rgba(0,0,0,.16)'}" stroke-width="${on?2:1}"/>
+      <text x="${x+w/2}" y="${y+h/2}" text-anchor="middle" dominant-baseline="central"
+            font-size="14" font-weight="700" fill="${txt}">${sido}</text>
+      ${(!on && done) ? `<circle cx="${x+w-9}" cy="${y+9}" r="3.2" fill="var(--teal,#0F6B5C)"/>` : ''}
     </g>`;
   }).join('');
 
@@ -3716,8 +3740,12 @@ function sidoMapHTML(){
   })() : '<div style="font-size:12.5px;color:var(--sub);margin-top:10px;">시·도를 누르면 그 안의 시·군·구가 펼쳐집니다.</div>';
 
   return `<div style="background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;">
-    <svg viewBox="0 0 300 416" style="width:100%;max-width:340px;display:block;margin:0 auto;" role="img"
+    <svg viewBox="0 0 298 314" style="width:100%;max-width:360px;display:block;margin:0 auto;" role="img"
          aria-label="시도 선택 지도">${boxes}</svg>
+    <div style="font-size:11.5px;color:var(--sub);text-align:center;margin-top:6px;">
+      <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--teal,#0F6B5C);vertical-align:middle;"></span>
+      표시가 있는 시·도에 조사 중인 지역이 있습니다
+    </div>
     ${guPanel}
   </div>`;
 }
