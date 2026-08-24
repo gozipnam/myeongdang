@@ -1467,7 +1467,7 @@ function repairAndParse(raw){
    ═══════════════════════════════════════════════════════════ */
 /* 배포된 파일이 최신인지 확인하는 표시입니다.
    브라우저 콘솔에 MD_VERSION 을 입력하면 바로 볼 수 있습니다. */
-const MD_VERSION = 'v10 · 2026-07-30 · 지역검색·지도선택·인천개편';
+const MD_VERSION = 'v11 · 2026-07-30 · 행정구역 지도·시군구 230개';
 try{ window.MD_VERSION = MD_VERSION; console.log('명당 ' + MD_VERSION); }catch(_){}
 
 const AI_PROXY_URL  = 'https://myeongdang-ai.yjyu.workers.dev';
@@ -3313,10 +3313,7 @@ function renderRegionList(v){
       ${regionQuery?`<button class="chip" onclick="clearRegionQuery()">✕ 지우기</button>`:''}
       <button class="chip ${regionMapOpen?'active':''}" onclick="toggleRegionMap()">🗺️ 지도에서 고르기</button>
     </div>
-    <div id="regionMapBox" style="display:${regionMapOpen?'block':'none'};margin-bottom:14px;">
-      <div id="regionMapStatus" style="font-size:12.5px;color:var(--sub);margin-bottom:6px;">지도에서 조사할 지역을 눌러 주세요. 등록된 지역이면 바로 열리고, 없으면 추가할 수 있어요.</div>
-      <div id="regionMap" style="height:360px;border-radius:14px;overflow:hidden;border:1px solid var(--line);"></div>
-    </div>
+    ${regionMapOpen ? `<div style="margin-bottom:14px;">${sidoMapHTML()}</div>` : ''}
     <div id="regionGroups">${regionGroupsHTML()}</div>`;
 }
 
@@ -3582,54 +3579,33 @@ function openRegion(id){ svRegionId=id; svFilter='all'; renderSurvey(); window.s
 function closeRegion(){ svRegionId=null; renderSurvey(); }
 
 /* ---- 지역 CRUD ---- */
-// 시도 자동 매핑 (시·군·구 이름 → 시도)
-const SIDO_MAP = {
-  // 서울 25구
-  ...'종로 중 용산 성동 광진 동대문 중랑 성북 강북 도봉 노원 은평 서대문 마포 양천 강서 구로 금천 영등포 동작 관악 서초 강남 송파 강동'.split(' ').reduce((a,g)=>(a[g+'구']='서울',a),{}),
-  // 부산 16구군
-  ...'중 서 동 영도 부산진 동래 남 북 해운대 사하 금정 강서 연제 수영 사상'.split(' ').reduce((a,g)=>(a[g+'구']='부산',a),{}),
-  기장군:'부산',
-  // 대구 8구군
-  ...'중 동 서 남 북 수성 달서'.split(' ').reduce((a,g)=>(a[g+'구']='대구',a),{}), 달성군:'대구',
-  // 인천 10구군
+// ── 시도별 시·군·구 (하나의 원본 데이터) ──
+const SIDO_GUS = {
+  '서울': '종로 중 용산 성동 광진 동대문 중랑 성북 강북 도봉 노원 은평 서대문 마포 양천 강서 구로 금천 영등포 동작 관악 서초 강남 송파 강동'.split(' ').map(g=>g+'구'),
   // 인천 2군 9구 (2026-07-01 개편: 중구·동구→제물포구, 영종구 신설, 서구→서해구+검단구)
-  ...'제물포 영종 미추홀 연수 남동 부평 계양 서해 검단'.split(' ').reduce((a,g)=>(a[g+'구']='인천',a),{}),
-  강화군:'인천', 옹진군:'인천',
-  // 광주 5구
-  ...'동 서 남 북 광산'.split(' ').reduce((a,g)=>(a[g+'구']='광주',a),{}),
-  // 대전 5구
-  ...'동 중 서 유성 대덕'.split(' ').reduce((a,g)=>(a[g+'구']='대전',a),{}),
-  // 울산 5구군
-  ...'중 남 동 북'.split(' ').reduce((a,g)=>(a[g+'구']='울산',a),{}), 울주군:'울산',
-  // 세종
-  세종시:'세종',
-  // 경기 31시군
-  ...'수원 성남 의정부 안양 부천 광명 평택 동두천 안산 고양 과천 구리 남양주 오산 시흥 군포 의왕 하남 용인 파주 이천 안성 김포 화성 광주 양주 포천 여주'.split(' ').reduce((a,c)=>(a[c+'시']='경기',a),{}),
-  연천군:'경기', 가평군:'경기', 양평군:'경기',
-  // 강원 18시군
-  ...'춘천 원주 강릉 동해 태백 속초 삼척'.split(' ').reduce((a,c)=>(a[c+'시']='강원',a),{}),
-  ...'홍천 횡성 영월 평창 정선 철원 화천 양구 인제 고성 양양'.split(' ').reduce((a,c)=>(a[c+'군']='강원',a),{}),
-  // 충북 12시군
-  ...'청주 충주 제천'.split(' ').reduce((a,c)=>(a[c+'시']='충북',a),{}),
-  ...'보은 옥천 영동 증평 진천 괴산 음성 단양'.split(' ').reduce((a,c)=>(a[c+'군']='충북',a),{}),
-  // 충남 15시군
-  ...'천안 공주 보령 아산 서산 논산 계룡 당진'.split(' ').reduce((a,c)=>(a[c+'시']='충남',a),{}),
-  ...'금산 부여 서천 청양 홍성 예산 태안'.split(' ').reduce((a,c)=>(a[c+'군']='충남',a),{}),
-  // 전북 14시군
-  ...'전주 군산 익산 정읍 남원 김제'.split(' ').reduce((a,c)=>(a[c+'시']='전북',a),{}),
-  ...'완주 진안 무주 장수 임실 순창 고창 부안'.split(' ').reduce((a,c)=>(a[c+'군']='전북',a),{}),
-  // 전남 22시군
-  ...'목포 여수 순천 나주 광양'.split(' ').reduce((a,c)=>(a[c+'시']='전남',a),{}),
-  ...'담양 곡성 구례 고흥 보성 화순 장흥 강진 해남 영암 무안 함평 영광 장성 완도 진도 신안'.split(' ').reduce((a,c)=>(a[c+'군']='전남',a),{}),
-  // 경북 23시군
-  ...'포항 경주 김천 안동 구미 영주 영천 상주 문경 경산'.split(' ').reduce((a,c)=>(a[c+'시']='경북',a),{}),
-  ...'군위 의성 청송 영양 영덕 청도 고령 성주 칠곡 예천 봉화 울진 울릉'.split(' ').reduce((a,c)=>(a[c+'군']='경북',a),{}),
-  // 경남 18시군
-  ...'창원 진주 통영 사천 김해 밀양 거제 양산'.split(' ').reduce((a,c)=>(a[c+'시']='경남',a),{}),
-  ...'의령 함안 창녕 고성 남해 하동 산청 함양 거창 합천'.split(' ').reduce((a,c)=>(a[c+'군']='경남',a),{}),
-  // 제주
-  제주시:'제주', 서귀포시:'제주'
+  '인천': '제물포 영종 미추홀 연수 남동 부평 계양 서해 검단'.split(' ').map(g=>g+'구').concat(['강화군','옹진군']),
+  '경기': '수원 성남 의정부 안양 부천 광명 평택 동두천 안산 고양 과천 구리 남양주 오산 시흥 군포 의왕 하남 용인 파주 이천 안성 김포 화성 광주 양주 포천 여주'.split(' ').map(c=>c+'시').concat(['연천군','가평군','양평군']),
+  '강원': '춘천 원주 강릉 동해 태백 속초 삼척'.split(' ').map(c=>c+'시').concat('홍천 횡성 영월 평창 정선 철원 화천 양구 인제 고성 양양'.split(' ').map(c=>c+'군')),
+  '충북': '청주 충주 제천'.split(' ').map(c=>c+'시').concat('보은 옥천 영동 증평 진천 괴산 음성 단양'.split(' ').map(c=>c+'군')),
+  '충남': '천안 공주 보령 아산 서산 논산 계룡 당진'.split(' ').map(c=>c+'시').concat('금산 부여 서천 청양 홍성 예산 태안'.split(' ').map(c=>c+'군')),
+  '세종': ['세종시'],
+  '대전': '동 중 서 유성 대덕'.split(' ').map(g=>g+'구'),
+  '전북': '전주 군산 익산 정읍 남원 김제'.split(' ').map(c=>c+'시').concat('완주 진안 무주 장수 임실 순창 고창 부안'.split(' ').map(c=>c+'군')),
+  '전남': '목포 여수 순천 나주 광양'.split(' ').map(c=>c+'시').concat('담양 곡성 구례 고흥 보성 화순 장흥 강진 해남 영암 무안 함평 영광 장성 완도 진도 신안'.split(' ').map(c=>c+'군')),
+  '광주': '동 서 남 북 광산'.split(' ').map(g=>g+'구'),
+  '경북': '포항 경주 김천 안동 구미 영주 영천 상주 문경 경산'.split(' ').map(c=>c+'시').concat('군위 의성 청송 영양 영덕 청도 고령 성주 칠곡 예천 봉화 울진 울릉'.split(' ').map(c=>c+'군')),
+  '대구': '중 동 서 남 북 수성 달서'.split(' ').map(g=>g+'구').concat(['달성군']),
+  '경남': '창원 진주 통영 사천 김해 밀양 거제 양산'.split(' ').map(c=>c+'시').concat('의령 함안 창녕 고성 남해 하동 산청 함양 거창 합천'.split(' ').map(c=>c+'군')),
+  '울산': '중 남 동 북'.split(' ').map(g=>g+'구').concat(['울주군']),
+  '부산': '중 서 동 영도 부산진 동래 남 북 해운대 사하 금정 강서 연제 수영 사상'.split(' ').map(g=>g+'구').concat(['기장군']),
+  '제주': ['제주시','서귀포시']
 };
+
+// 시·군·구 이름 → 시도 (같은 이름이 여러 곳이면 위 순서상 먼저 나온 곳)
+const SIDO_MAP = {};
+Object.keys(SIDO_GUS).forEach(sido => {
+  SIDO_GUS[sido].forEach(g => { if(!(g in SIDO_MAP)) SIDO_MAP[g] = sido; });
+});
 function detectSido(name){
   const n = name.trim();
   // 이미 "경기 화성시" 형태면 그대로
@@ -3666,68 +3642,94 @@ function addRegionFromQuery(){
   createRegionByName(detectSido(q));
 }
 
-/* ── 지도에서 지역 고르기 ── */
-let regionMapObj = null, regionMapOpen = false, pendingRegionName = '';
+/* ── 행정구역 지도에서 고르기 ──
+   네이버 역지오코딩에 의존하지 않고, 앱이 가진 SIDO_GUS 데이터로 직접 고릅니다.
+   시도 블록은 실제 위치를 본떠 배치한 도식이며 정확한 국경선은 아닙니다. */
+let regionMapOpen = false, pickedSido = '';
+
+/* 시도 블록 배치 (x, y, 너비, 높이) */
+const SIDO_BOX = {
+  '인천': [14, 44, 58, 36],   '서울': [78, 44, 62, 36],   '강원': [146, 30, 140, 88],
+  '경기': [14, 86, 126, 58],  '충북': [146, 124, 76, 58], '경북': [228, 124, 58, 120],
+  '충남': [14, 150, 74, 64],  '세종': [94, 150, 46, 30],  '대전': [94, 184, 46, 30],
+  '대구': [146, 188, 76, 40], '전북': [14, 220, 126, 54], '경남': [146, 234, 76, 62],
+  '울산': [228, 250, 58, 36], '전남': [14, 280, 92, 78],  '광주': [112, 280, 28, 50],
+  '부산': [228, 292, 58, 36], '제주': [14, 372, 92, 34]
+};
+
 function toggleRegionMap(){
   regionMapOpen = !regionMapOpen;
-  const box = document.getElementById('regionMapBox');
-  if(!box) return;
-  box.style.display = regionMapOpen ? 'block' : 'none';
-  if(regionMapOpen) initRegionMap();
+  if(!regionMapOpen) pickedSido = '';
+  renderSurvey();
 }
-function initRegionMap(){
-  ensureNaverMap().then(()=>{
-    const el = document.getElementById('regionMap');
-    if(!el) return;
-    if(!regionMapObj){
-      // 남한 전체가 보이는 위치·배율에서 시작합니다
-      const center = (myLat && myLng) ? new naver.maps.LatLng(myLat, myLng)
-                                      : new naver.maps.LatLng(36.5, 127.8);
-      regionMapObj = new naver.maps.Map(el, { center, zoom: (myLat&&myLng) ? 11 : 7 });
-      naver.maps.Event.addListener(regionMapObj, 'click', e => pickRegionFromMap(e.coord));
-    }else{
-      naver.maps.Event.trigger(regionMapObj, 'resize');
-    }
-  }).catch(()=> notify('지도를 불러오지 못했어요.'));
+function pickSido(sido){
+  pickedSido = (pickedSido === sido) ? '' : sido;
+  renderSurvey();
 }
-/* 지도에서 찍은 좌표 → 시·군·구 이름 */
-function pickRegionFromMap(coord){
-  const st = document.getElementById('regionMapStatus');
-  if(st) st.textContent = '위치를 확인하는 중…';
-  naver.maps.Service.reverseGeocode({
-    coords: coord,
-    orders: [naver.maps.Service.OrderType.ADDR, naver.maps.Service.OrderType.ROAD_ADDR].join(',')
-  }, (status, resp)=>{
-    if(status !== naver.maps.Service.Status.OK){ if(st) st.textContent = '주소를 읽지 못했어요. 다른 지점을 눌러 주세요.'; return; }
-    const r = (resp.v2 && resp.v2.results && resp.v2.results[0]) || null;
-    if(!r || !r.region){ if(st) st.textContent = '이 지점의 주소를 찾을 수 없어요.'; return; }
-    const sido = (r.region.area1 && r.region.area1.name) || '';
-    const sigg = (r.region.area2 && r.region.area2.name) || '';
-    if(!sigg){ if(st) st.textContent = '시·군·구를 확인할 수 없어요. 조금 더 확대해서 눌러 주세요.'; return; }
-    const shortSido = (sido || '').replace(/(특별자치도|특별자치시|특별시|광역시|자치도|도)$/, '');
-    const full = `${shortSido} ${sigg}`.trim();
-    onRegionPicked(full, st);
-  });
-}
-async function onRegionPicked(full, st){
+
+/* 등록된 지역이면 여는 함수, 아니면 추가 제안 */
+function pickGu(sido, gu){
+  const full = `${sido} ${gu}`;
   const exist = regions.find(x => (x.name||'').replace(/\s/g,'') === full.replace(/\s/g,''));
-  if(exist){
-    if(st) st.innerHTML = `<b>${esc(full)}</b> 지역으로 이동합니다…`;
-    openRegion(exist.id);
-    return;
-  }
-  pendingRegionName = full;
-  if(st) st.innerHTML = `<b>${esc(full)}</b> — 아직 등록되지 않은 지역입니다.
-    <button class="btn btn-primary btn-sm" style="margin-left:6px;" onclick="createRegionByName(pendingRegionName)">+ 이 지역 추가</button>`;
+  if(exist){ openRegion(exist.id); return; }
+  if(confirm(`"${full}" 는 아직 등록되지 않았어요.\n\n지금 추가할까요?`)) createRegionByName(full);
 }
+
+/* 시도별로 등록된 시군구 수 */
+function sidoDoneCount(sido){
+  const list = SIDO_GUS[sido] || [];
+  return list.filter(g => regions.some(r => (r.name||'').replace(/\s/g,'') === (sido+g))).length;
+}
+
+function sidoMapHTML(){
+  const boxes = Object.keys(SIDO_BOX).map(sido=>{
+    const [x,y,w,h] = SIDO_BOX[sido];
+    const done = sidoDoneCount(sido);
+    const on = pickedSido === sido;
+    const fill = on ? 'var(--teal, #0F6B5C)' : done ? 'rgba(15,107,92,.14)' : 'rgba(0,0,0,.05)';
+    const txt  = on ? '#fff' : 'var(--fg, #1F1F1F)';
+    return `<g class="sido-hit" style="cursor:pointer;" onclick="pickSido('${sido}')">
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7" fill="${fill}" stroke="${on?'var(--teal,#0F6B5C)':'rgba(0,0,0,.18)'}" stroke-width="${on?2:1}"/>
+      <text x="${x+w/2}" y="${y+h/2-(done?5:0)}" text-anchor="middle" dominant-baseline="central"
+            font-size="13" font-weight="700" fill="${txt}">${sido}</text>
+      ${done?`<text x="${x+w/2}" y="${y+h/2+11}" text-anchor="middle" dominant-baseline="central"
+            font-size="10.5" fill="${on?'rgba(255,255,255,.85)':'var(--sub,#6B6B6B)'}">${done}곳 조사중</text>`:''}
+    </g>`;
+  }).join('');
+
+  const guPanel = pickedSido ? (()=>{
+    const list = SIDO_GUS[pickedSido] || [];
+    return `<div style="margin-top:12px;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px;">${esc(pickedSido)} — 조사할 시·군·구를 누르세요</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">
+        ${list.map(g=>{
+          const reg = regions.find(r => (r.name||'').replace(/\s/g,'') === (pickedSido+g));
+          const cnt = reg ? cafes.filter(c=>c.regionId===reg.id).length : 0;
+          return `<button class="chip ${reg?'active':''}" onclick="pickGu('${pickedSido}','${g}')"
+            title="${reg?'등록됨':'미등록 — 누르면 추가'}">${esc(g)}${reg?` <b>${cnt}</b>`:''}</button>`;
+        }).join('')}
+      </div>
+      <div style="font-size:11.5px;color:var(--sub);margin-top:8px;">
+        진한 칸은 이미 등록된 지역입니다. 옅은 칸을 누르면 새로 추가할 수 있어요.
+      </div>
+    </div>`;
+  })() : '<div style="font-size:12.5px;color:var(--sub);margin-top:10px;">시·도를 누르면 그 안의 시·군·구가 펼쳐집니다.</div>';
+
+  return `<div style="background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;">
+    <svg viewBox="0 0 300 416" style="width:100%;max-width:340px;display:block;margin:0 auto;" role="img"
+         aria-label="시도 선택 지도">${boxes}</svg>
+    ${guPanel}
+  </div>`;
+}
+
 async function createRegionByName(name){
   if(!db || !fbUser){ notify('로그인이 필요해요.'); return; }
+  const dup = regions.find(x => (x.name||'').replace(/\s/g,'') === name.replace(/\s/g,''));
+  if(dup){ openRegion(dup.id); return; }
   const id = 'r' + Date.now();
   try{
     await db.collection('regions').doc(id).set({ id, name, order: (regions.length+1)*10 });
     notify(`${name} 지역을 추가했어요.`);
-    const st = document.getElementById('regionMapStatus');
-    if(st) st.innerHTML = `<b>${esc(name)}</b> 추가 완료 — 목록에서 열어 주세요.`;
   }catch(e){ notify('지역 추가 실패: ' + (e.message||'')); }
 }
 
