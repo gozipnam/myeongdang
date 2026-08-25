@@ -1467,7 +1467,7 @@ function repairAndParse(raw){
    ═══════════════════════════════════════════════════════════ */
 /* 배포된 파일이 최신인지 확인하는 표시입니다.
    브라우저 콘솔에 MD_VERSION 을 입력하면 바로 볼 수 있습니다. */
-const MD_VERSION = 'v12 · 2026-07-30 · 지도 정렬·빈 지역 삭제';
+const MD_VERSION = 'v13 · 2026-07-30 · 지역이동·중복클릭·상단정렬';
 try{ window.MD_VERSION = MD_VERSION; console.log('명당 ' + MD_VERSION); }catch(_){}
 
 const AI_PROXY_URL  = 'https://myeongdang-ai.yjyu.workers.dev';
@@ -3336,8 +3336,14 @@ function regionGroupsHTML(){
   });
   const groups = {};
   shown.forEach(r=>{ const p = svProvince(r.name); (groups[p] = groups[p]||[]).push(r); });
-  return Object.keys(groups).map(prov=>`
-      <div class="group-head">${esc(prov)}<span>${groups[prov].length}개 지역</span></div>
+  // 지도에서 고른 시·도를 맨 위로 올립니다
+  const provOrder = Object.keys(groups).sort((a,b)=>{
+    if(a === pickedSido) return -1;
+    if(b === pickedSido) return 1;
+    return 0;
+  });
+  return provOrder.map(prov=>`
+      <div class="group-head" ${prov===pickedSido?'id="pickedGroup" style="color:var(--teal);"':''}>${esc(prov)}${prov===pickedSido?' ◀ 선택':''}<span>${groups[prov].length}개 지역</span></div>
       <div class="sv-grid">
         ${groups[prov].map(r=>{
           const cnt = counts[r.id]||0, done = occN[r.id]||0;
@@ -3676,6 +3682,13 @@ function toggleRegionMap(){
 function pickSido(sido){
   pickedSido = (pickedSido === sido) ? '' : sido;
   renderSurvey();
+  // 고른 시·도의 지역 카드가 맨 위로 올라오므로, 그 자리로 부드럽게 이동합니다
+  if(pickedSido){
+    setTimeout(()=>{
+      const el = document.getElementById('pickedGroup');
+      if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    }, 60);
+  }
 }
 
 /* 등록된 지역이면 여는 함수, 아니면 추가 제안 */
@@ -3817,6 +3830,13 @@ function cafeFormHTML(c){
       </div>
       <div style="font-size:11.5px;color:var(--sub);margin-top:4px;">사물함 수를 입력하면 자동으로 체크됩니다. 값이 지난번과 같아도 조사일은 오늘로 기록됩니다.</div>
       ${histLineHTML(c, 8)}
+    </div>
+
+    <div class="field" style="margin-top:8px;"><label>소속 지역 (행정구역 이동)</label>
+      <select id="cf_region" class="inline-input">
+        ${regions.map(r=>`<option value="${r.id}" ${((c?.regionId)||svRegionId)===r.id?'selected':''}>${esc(r.name)}</option>`).join('')}
+      </select>
+      <div style="font-size:11.5px;color:var(--sub);margin-top:4px;">행정구역이 바뀐 매장은 여기서 옮기면 조사 기록이 그대로 따라갑니다.</div>
     </div>
 
     <div class="grid2" style="margin-top:8px;">
@@ -4283,11 +4303,11 @@ function findDupCafes(name, excludeId){
     if(cKey === key || (core.length >= 2 && cafeCore(c.name) === core)){
       out.push({ c, kind:'name', sameRegion }); return;
     }
-    if(!sameRegion) return;
-
+    // 주소가 같으면 같은 건물입니다 — 행정구역이 갈린 경우를 위해 다른 지역도 봅니다
     if(myAddr.length >= 8 && cafeAddrKey(c.addr) === myAddr){
       out.push({ c, kind:'addr', sameRegion }); return;
     }
+    // 브랜드+지점명 일치도 지역을 넘어 확인합니다 (인천 서구 → 서해구·검단구 분리 등)
     if(myBrand.length >= 1 && brandOf(c) === myBrand){
       const cb = branchOf(c);
       const short = myBranch.length <= cb.length ? myBranch : cb;
@@ -4300,6 +4320,18 @@ function findDupCafes(name, excludeId){
   const rank = { name:0, addr:1, branch:2 };
   return out.sort((a,b)=> rank[a.kind] - rank[b.kind]).slice(0, 6);
 }
+/* 중복 안내에서 그 매장을 눌렀을 때 — 해당 매장 수정 화면으로 전환합니다. */
+function jumpToCafe(id, ev){
+  if(ev) ev.stopPropagation();
+  const c = cafes.find(x=>x.id===id);
+  if(!c){ notify('그 매장을 찾을 수 없어요.'); return; }
+  const typing = (document.getElementById('cf_name')?.value || '').trim();
+  if(typing && !cafeEditId && !confirm(`지금 입력한 "${typing}" 내용은 저장되지 않습니다.\n\n"${c.name}" 을 열까요?`)) return;
+  const other = (c.regionId !== svRegionId) ? regions.find(r=>r.id===c.regionId) : null;
+  editCafe(id);
+  if(other) notify(`${other.name} 의 매장을 열었어요. 저장하면 그 지역에 남습니다.`);
+}
+
 /* 매장명·주소·브랜드를 입력하는 동안 바로 안내를 띄웁니다. */
 function checkDupHint(){
   const el = document.getElementById('cf_dupHint');
@@ -4322,10 +4354,11 @@ function checkDupHint(){
     const occ = (c.lockerUsed !== '' && c.lockerUsed != null && c.lockerTotal)
       ? ` · 점유율 ${Math.round(c.lockerUsed / c.lockerTotal * 100)}%` : '';
     const where = h.sameRegion ? (c.dong || '') : '다른 지역';
-    return `<div style="font-size:12.5px;padding:4px 0;">
+    return `<div style="font-size:12.5px;padding:6px 0;border-top:1px solid var(--line);cursor:pointer;"
+                 onclick="jumpToCafe('${c.id}', event)" title="이 매장을 열어 수정합니다">
       🔴 <b>${esc(c.name)}</b>
       <span style="color:var(--sub);">${esc(where)}${esc(c.vendor && c.vendor !== '미확인' ? ' · ' + c.vendor : '')}${occ}</span>
-      <div style="font-size:11.5px;color:var(--sub);">${REASON[h.kind] || ''}</div>
+      <div style="font-size:11.5px;color:var(--sub);">${REASON[h.kind] || ''} · <b style="color:var(--teal);">눌러서 수정 →</b></div>
     </div>`;
   }).join('');
 
@@ -4336,7 +4369,7 @@ function checkDupHint(){
     </div>
     ${rows}
     <div style="font-size:11.5px;color:var(--sub);margin-top:6px;">
-      같은 지점이라면 기존 매장을 열어 수정해 주세요.
+      같은 지점이라면 위 매장을 눌러 수정하세요. 행정구역만 바뀐 경우라면 그 매장에서 <b>소속 지역</b>을 옮기면 됩니다.
     </div>
   </div>`;
 }
@@ -4415,8 +4448,9 @@ async function saveCafe(){
     if(geo){ lat = geo.lat; lng = geo.lng; }
   }
   if(!addr){ lat = null; lng = null; }
+  const pickedRegion = g('cf_region') || prev?.regionId || svRegionId;
   const doc = {
-    id, regionId: svRegionId,
+    id, regionId: pickedRegion,
     name, dong: g('cf_dong').trim(), brand: g('cf_brand').trim(), addr,
     lat, lng,
     lockerUsed: lu, lockerTotal: lt, vendor: g('cf_vendor'),
