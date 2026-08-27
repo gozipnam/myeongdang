@@ -1467,7 +1467,7 @@ function repairAndParse(raw){
    ═══════════════════════════════════════════════════════════ */
 /* 배포된 파일이 최신인지 확인하는 표시입니다.
    브라우저 콘솔에 MD_VERSION 을 입력하면 바로 볼 수 있습니다. */
-const MD_VERSION = 'v13 · 2026-07-30 · 지역이동·중복클릭·상단정렬';
+const MD_VERSION = 'v14 · 2026-07-30 · 전국 행정구역 지역이동';
 try{ window.MD_VERSION = MD_VERSION; console.log('명당 ' + MD_VERSION); }catch(_){}
 
 const AI_PROXY_URL  = 'https://myeongdang-ai.yjyu.workers.dev';
@@ -3834,9 +3834,9 @@ function cafeFormHTML(c){
 
     <div class="field" style="margin-top:8px;"><label>소속 지역 (행정구역 이동)</label>
       <select id="cf_region" class="inline-input">
-        ${regions.map(r=>`<option value="${r.id}" ${((c?.regionId)||svRegionId)===r.id?'selected':''}>${esc(r.name)}</option>`).join('')}
+        ${regionSelectHTML((c?.regionId) || svRegionId)}
       </select>
-      <div style="font-size:11.5px;color:var(--sub);margin-top:4px;">행정구역이 바뀐 매장은 여기서 옮기면 조사 기록이 그대로 따라갑니다.</div>
+      <div style="font-size:11.5px;color:var(--sub);margin-top:4px;">행정구역이 바뀐 매장은 여기서 옮기면 조사 기록이 그대로 따라갑니다. 목록에 없는 곳은 <b>새로 만들기</b>를 고르면 지역까지 함께 생성됩니다.</div>
     </div>
 
     <div class="grid2" style="margin-top:8px;">
@@ -4320,6 +4320,52 @@ function findDupCafes(name, excludeId){
   const rank = { name:0, addr:1, branch:2 };
   return out.sort((a,b)=> rank[a.kind] - rank[b.kind]).slice(0, 6);
 }
+/* 매장의 소속 지역 선택 목록.
+   등록된 지역 + 전국 시·군·구 전체를 시·도별로 묶어 보여줍니다.
+   등록 안 된 곳을 고르면 저장할 때 지역이 자동으로 만들어집니다. */
+function regionSelectHTML(curId){
+  const byName = {};
+  regions.forEach(r=>{ byName[(r.name||'').replace(/\s/g,'')] = r; });
+  const cur = regions.find(r=>r.id===curId);
+  const curSido = cur ? svProvince(cur.name) : '';
+  const used = new Set();
+
+  // 시·도 정렬: 현재 지역의 시·도 → 등록된 지역이 있는 시·도 → 나머지
+  const sidos = Object.keys(SIDO_GUS).slice().sort((a,b)=>{
+    if(a === curSido) return -1;
+    if(b === curSido) return 1;
+    const ha = SIDO_GUS[a].some(g=>byName[a+g]) ? 0 : 1;
+    const hb = SIDO_GUS[b].some(g=>byName[b+g]) ? 0 : 1;
+    return ha - hb;
+  });
+
+  let html = sidos.map(sido=>{
+    const opts = SIDO_GUS[sido].map(g=>{
+      const r = byName[sido+g];
+      if(r){
+        used.add(r.id);
+        const n = cafes.filter(c=>c.regionId===r.id).length;
+        return `<option value="${r.id}" ${curId===r.id?'selected':''}>${esc(r.name)} · ${n}곳</option>`;
+      }
+      return `<option value="new:${sido} ${g}">${esc(sido + ' ' + g)} — 새로 만들기</option>`;
+    }).join('');
+    const mark = SIDO_GUS[sido].some(g=>byName[sido+g]) ? '● ' : '';
+    return `<optgroup label="${mark}${sido}">${opts}</optgroup>`;
+  }).join('');
+
+  // 위 목록에 없는 이름으로 등록된 지역 (예: 개편 전 "인천 서구") 도 반드시 남깁니다
+  const others = regions.filter(r=>!used.has(r.id));
+  if(others.length){
+    html = `<optgroup label="기타 등록된 지역">${
+      others.map(r=>{
+        const n = cafes.filter(c=>c.regionId===r.id).length;
+        return `<option value="${r.id}" ${curId===r.id?'selected':''}>${esc(r.name)} · ${n}곳</option>`;
+      }).join('')
+    }</optgroup>` + html;
+  }
+  return html;
+}
+
 /* 중복 안내에서 그 매장을 눌렀을 때 — 해당 매장 수정 화면으로 전환합니다. */
 function jumpToCafe(id, ev){
   if(ev) ev.stopPropagation();
@@ -4448,7 +4494,21 @@ async function saveCafe(){
     if(geo){ lat = geo.lat; lng = geo.lng; }
   }
   if(!addr){ lat = null; lng = null; }
-  const pickedRegion = g('cf_region') || prev?.regionId || svRegionId;
+  // 소속 지역 — "new:경기 화성시" 형태면 그 지역을 먼저 만듭니다
+  let pickedRegion = g('cf_region') || prev?.regionId || svRegionId;
+  if(String(pickedRegion).startsWith('new:')){
+    const nm = String(pickedRegion).slice(4).trim();
+    const ex = regions.find(r=>(r.name||'').replace(/\s/g,'') === nm.replace(/\s/g,''));
+    if(ex){ pickedRegion = ex.id; }
+    else{
+      const rid = 'r' + Date.now();
+      try{
+        await db.collection('regions').doc(rid).set({ id: rid, name: nm, order: (regions.length+1)*10 });
+        pickedRegion = rid;
+        notify(`${nm} 지역을 만들었어요.`);
+      }catch(e){ notify('지역 생성 실패: ' + (e.message||'')); return; }
+    }
+  }
   const doc = {
     id, regionId: pickedRegion,
     name, dong: g('cf_dong').trim(), brand: g('cf_brand').trim(), addr,
