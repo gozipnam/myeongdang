@@ -283,6 +283,7 @@
     <div class="tabs">
       <button class="tab" id="tab-survey" onclick="switchTab('survey')">🔍 점유율 조사</button>
       <button class="tab active" id="tab-site" onclick="switchTab('site')">📍 후보지</button>
+      <button class="tab" id="tab-deal" onclick="switchTab('deal')">🏢 매물 관리</button>
     </div>
   </div>
 </div>
@@ -291,6 +292,9 @@
 
   <!-- ===== 조사 뷰 ===== -->
   <div id="surveyView" style="display:none;"></div>
+
+  <!-- ===== 매물 관리 뷰 ===== -->
+  <div id="dealView" style="display:none;"></div>
 
   <!-- ===== 목록 뷰 ===== -->
   <div id="listView">
@@ -360,13 +364,44 @@
 
     <div class="form-card">
       <h2>임대 조건 (만원)</h2>
+      <label class="ownerToggle" style="display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer;font-size:13px;">
+        <input type="checkbox" id="f_owner" onchange="toggleOwner()" style="width:17px;height:17px;">
+        <b>건물주 소유 (자가)</b>
+        <span style="color:var(--sub);font-size:12px;">— 보증금·월세를 내지 않는 경우</span>
+      </label>
       <div class="grid3" style="margin-top:8px;">
-        <div class="field"><label>보증금 *</label><input id="f_deposit" type="number" placeholder="3000" oninput="liveCalc()"></div>
-        <div class="field"><label>월세 *</label><input id="f_rent" type="number" placeholder="180" oninput="liveCalc()"></div>
+        <div class="field" id="wrap_deposit"><label>보증금 *</label><input id="f_deposit" type="number" placeholder="3000" oninput="liveCalc()"></div>
+        <div class="field" id="wrap_rent"><label>월세 *</label><input id="f_rent" type="number" placeholder="180" oninput="liveCalc()"></div>
         <div class="field"><label>관리비</label><input id="f_mgmt" type="number" placeholder="30" oninput="liveCalc()"></div>
         <div class="field"><label>권리금</label><input id="f_premium" type="number" placeholder="0"></div>
         <div class="field"><label>기타 고정비</label><input id="f_etc" type="number" placeholder="90" oninput="liveCalc()"><div class="hint">전기·인터넷·청소 등 월 예상</div></div>
         <div class="field"><label>월세 협상 여지</label><select id="f_nego"><option value="unknown">미확인</option><option value="yes">가능</option><option value="no">불가</option></select></div>
+      </div>
+      <div id="fitBox" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="form-card">
+      <h2>인수창업 (기존 매장 인수 시)</h2>
+      <div class="desc">신규 출점이면 비워두세요. 값을 넣으면 수익성 역산이 함께 계산됩니다.</div>
+      <div class="grid3" style="margin-top:8px;">
+        <div class="field"><label>기존 월매출 (만원)</label><input id="f_revenue" type="number" placeholder="800" oninput="liveCalc()"><div class="hint">매도자 제시 또는 추정치</div></div>
+        <div class="field"><label>좌석 수</label><input id="f_seats" type="number" placeholder="61" oninput="liveCalc()"></div>
+        <div class="field"><label>오픈 연도</label><input id="f_openYear" type="number" placeholder="2021" oninput="liveCalc()"><div class="hint">사용연수 자동 계산</div></div>
+        <div class="field"><label>인건비 (월, 만원)</label><input id="f_labor" type="number" placeholder="0" oninput="liveCalc()"></div>
+        <div class="field"><label>재료비 (월, 만원)</label><input id="f_material" type="number" placeholder="0" oninput="liveCalc()"></div>
+        <div class="field"><label>시설 인수비 (만원)</label><input id="f_fixture" type="number" placeholder="0" oninput="liveCalc()"><div class="hint">권리금과 별도인 경우</div></div>
+      </div>
+      <div id="acqBox" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="form-card">
+      <h2>매물 출처</h2>
+      <div class="desc">어디서 본 매물인지 남겨두면 다시 찾을 때와 연락할 때 편합니다.</div>
+      <div class="grid3" style="margin-top:8px;">
+        <div class="field"><label>부동산명</label><input id="f_agency" placeholder="예: 다산OO공인중개사"></div>
+        <div class="field"><label>연락처</label><input id="f_agencyTel" type="tel" inputmode="tel" placeholder="031-000-0000"><div class="hint">저장하면 카드에서 바로 전화를 걸 수 있습니다</div></div>
+        <div class="field"><label>확인일</label><input id="f_listedAt" type="date"></div>
+        <div class="field" style="grid-column:1/-1;"><label>매물 링크</label><input id="f_listingUrl" placeholder="네이버 부동산 등 매물 주소를 붙여넣기"><div class="hint">직접 복사한 링크만 저장됩니다</div></div>
       </div>
     </div>
 
@@ -387,6 +422,39 @@
         <div class="field"><label>최근 3년 폐업 수</label><input id="f_closed" type="number" placeholder="1" oninput="liveCalc()"></div>
         <div class="field"><label>평균 운영기간 (년)</label><input id="f_avgyears" type="number" step="0.1" placeholder="4.5" oninput="liveCalc()"><div class="hint">모르면 비워두기 (중간값 적용)</div></div>
       </div>
+    </div>
+
+    <div class="form-card">
+      <h2>배후 수요 · 접근성 (합격 기준 항목)</h2>
+      <div class="desc">소상공인365 · 오픈업 · 네이버지도에서 확인해 넣으면 합격 여부가 자동으로 판정됩니다.</div>
+
+      <div style="font-size:12px;font-weight:700;color:var(--teal);margin:10px 0 6px;">소상공인365 — 인구</div>
+      <div class="grid3">
+        <div class="field"><label>주거 10대 (명)</label><input id="f_pop10" type="number" placeholder="2433" oninput="liveCalc()"><div class="hint">기준 2,000명 이상</div></div>
+        <div class="field"><label>주거 20대 (명)</label><input id="f_pop20" type="number" placeholder="1842" oninput="liveCalc()"><div class="hint">기준 2,000명 이상</div></div>
+        <div class="field"><label>유동 10대 (명)</label><input id="f_flow10" type="number" placeholder="5374" oninput="liveCalc()"></div>
+        <div class="field"><label>유동 20대 (명)</label><input id="f_flow20" type="number" placeholder="4865" oninput="liveCalc()"></div>
+      </div>
+
+      <div style="font-size:12px;font-weight:700;color:var(--teal);margin:14px 0 6px;">오픈업 — 세대수 · 경쟁사 매출</div>
+      <div class="grid3">
+        <div class="field"><label>아파트 세대수</label><input id="f_apt" type="number" placeholder="7891" oninput="liveCalc()"><div class="hint">기준 3,000세대 이상</div></div>
+        <div class="field"><label>경쟁사 평균 매출 (만원)</label><input id="f_compRev" type="number" placeholder="607" oninput="liveCalc()"><div class="hint">기준 500만원 이상 · 카드 POS 추정</div></div>
+      </div>
+
+      <div style="font-size:12px;font-weight:700;color:var(--teal);margin:14px 0 6px;">네이버지도 — 거리</div>
+      <div class="grid3">
+        <div class="field"><label>지하철역 거리 (m)</label><input id="f_distSubway" type="number" placeholder="250" oninput="liveCalc()"><div class="hint">기준 500m 이내</div></div>
+        <div class="field"><label>중심상권 거리 (m)</label><input id="f_distCore" type="number" placeholder="300" oninput="liveCalc()"><div class="hint">기준 500m 이내</div></div>
+        <div class="field"><label>지하철역명</label><input id="f_subwayName" placeholder="다산역"></div>
+      </div>
+
+      <div style="font-size:12px;font-weight:700;color:var(--teal);margin:14px 0 6px;">호갱노노 — 소득 수준 (참고)</div>
+      <div class="grid3">
+        <div class="field"><label>아파트 평균 시세 (만원/평)</label><input id="f_aptPrice" type="number" placeholder="3500"><div class="hint">관리형 판단 시 참고</div></div>
+      </div>
+
+      <div id="demandBox" style="margin-top:14px;"></div>
     </div>
 
     <div class="form-card">
@@ -631,7 +699,7 @@ function calc(s){
   risk = Math.min(100, Math.round(risk));
 
   const dep = s.deposit ?? 0;
-  const grade = (dep <= 3500 && rent <= 200) ? 'green' : (dep <= 5000 && rent <= 250) ? 'amber' : 'red';
+  const grade = s.owner ? 'green' : (dep <= 3500 && rent <= 200) ? 'green' : (dep <= 5000 && rent <= 250) ? 'amber' : 'red';
   const verdict = total >= 80 ? '강력 검토' : total >= 65 ? '검토 권장' : total >= 50 ? '신중 검토' : '보류 추천';
 
   return { fixed, pyeong, score, cost, demand, compScore, loc, surv, successBonus, bldScore, total, rank, risk, grade, verdict };
@@ -867,7 +935,8 @@ function render(){
       </div>
 
       <div class="badges">
-        <span class="badge b-${c.grade==='green'?'green':c.grade==='amber'?'amber':'red'}">보증금 ${won(s.deposit)} · 월세 ${won(s.rent)}</span>
+        ${s.owner?`<span class="badge b-green">🏠 건물주 소유 (자가)</span>`
+          :`<span class="badge b-${c.grade==='green'?'green':c.grade==='amber'?'amber':'red'}">보증금 ${won(s.deposit)} · 월세 ${won(s.rent)}</span>`}
         <span class="badge b-gray">총고정비 ${won(c.fixed)}/월</span>
         <span class="badge ${c.risk<30?'b-green':c.risk<60?'b-amber':'b-red'}">폐업위험 ${c.risk} · ${riskLabel(c.risk)}</span>
       </div>
@@ -884,6 +953,8 @@ function render(){
         <button class="btn btn-ghost btn-sm" onclick="toggleDetail('${s.id}')">${open?'접기':'상세 · 현장조사'}</button>
         <button class="btn btn-ghost btn-sm" onclick="openReport('${s.id}')">보고서</button>
         ${s.addr?`<button class="btn btn-ghost btn-sm" onclick="toggleSiteMap('${s.id}')">🗺️ 지도</button>`:''}
+        ${s.agencyTel?`<a class="btn btn-ghost btn-sm" href="tel:${esc(s.agencyTel.replace(/[^0-9+]/g,''))}" onclick="event.stopPropagation()">📞 ${esc(s.agency||'부동산')}</a>`:''}
+        ${s.listingUrl?`<a class="btn btn-ghost btn-sm" href="${esc(s.listingUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🔗 매물</a>`:''}
         <button class="btn btn-ghost btn-sm" onclick="openForm('${s.id}')">수정</button>
         <button class="btn btn-danger btn-sm ${pendingDelete===s.id?'confirm':''}" onclick="delSite('${s.id}')">${pendingDelete===s.id?'정말 삭제할까요?':'삭제'}</button>
       </div>
@@ -1467,7 +1538,7 @@ function repairAndParse(raw){
    ═══════════════════════════════════════════════════════════ */
 /* 배포된 파일이 최신인지 확인하는 표시입니다.
    브라우저 콘솔에 MD_VERSION 을 입력하면 바로 볼 수 있습니다. */
-const MD_VERSION = 'v14 · 2026-07-30 · 전국 행정구역 지역이동';
+const MD_VERSION = 'v20 · 2026-11-23 · 배후수요 합격기준 8항목';
 try{ window.MD_VERSION = MD_VERSION; console.log('명당 ' + MD_VERSION); }catch(_){}
 
 const AI_PROXY_URL  = 'https://myeongdang-ai.yjyu.workers.dev';
@@ -2045,7 +2116,7 @@ function renderCompare(){
     { label:'종합점수', get:d=>d.c.total, better:'high', fmt:d=>`${d.c.total}점 · ${d.c.rank}등급` },
     { label:'상권점수', get:d=>d.c.score, better:'high', fmt:d=>d.c.score+'점' },
     { label:'건물점수', get:d=>d.c.bldScore, better:'high', fmt:d=>d.c.bldScore+'점' },
-    { label:'보증금', get:d=>d.s.deposit??Infinity, better:'low', fmt:d=>won(d.s.deposit) },
+    { label:'보증금', get:d=>d.s.owner?0:(d.s.deposit??Infinity), better:'low', fmt:d=>d.s.owner?'자가':won(d.s.deposit) },
     { label:'월세', get:d=>d.s.rent??Infinity, better:'low', fmt:d=>won(d.s.rent) },
     { label:'월 총고정비', get:d=>d.c.fixed, better:'low', fmt:d=>won(d.c.fixed) },
     { label:'평당 월세', get:d=>d.c.pyeong??Infinity, better:'low', fmt:d=>d.c.pyeong!=null?d.c.pyeong.toFixed(1)+'만':'—' },
@@ -2457,6 +2528,7 @@ function onAuthChanged(user){
   document.getElementById('gateMsg').textContent = '데이터를 불러오는 중…';
   document.getElementById('tabbar').style.display = 'block';
   subscribeSurvey(); // 조사 데이터(regions/cafes) 구독
+  subscribeDeals();  // 매물 데이터(dealAreas/deals) 구독
   try{ const last = localStorage.getItem('sc-lasttab'); if(last==='survey') switchTab('survey'); }catch(e){}
   unsubSites = db.collection('sites').onSnapshot(snap => {
     const arr = [];
@@ -2564,15 +2636,17 @@ function reportParts(s,c,forPdf){
 
     <div class="rp-sec">1. 임대 조건 및 고정비</div>
     <table class="mini">
-      <tr><td>보증금</td><td class="num">${won(s.deposit)}</td></tr>
-      <tr><td>월세</td><td class="num">${won(s.rent)}</td></tr>
+      ${s.owner?`<tr><td>임대 형태</td><td class="num">건물주 소유 (자가)</td></tr>`
+        :`<tr><td>보증금</td><td class="num">${won(s.deposit)}</td></tr>
+          <tr><td>월세</td><td class="num">${won(s.rent)}</td></tr>`}
       <tr><td>관리비</td><td class="num">${won(s.mgmt??0)}</td></tr>
       <tr><td>권리금</td><td class="num">${won(s.premium??0)}</td></tr>
       <tr><td>기타 고정비 (전기·인터넷 등)</td><td class="num">${won(s.etc??0)}</td></tr>
       <tr class="total"><td>월 총고정비</td><td class="num">${won(c.fixed)}</td></tr>
     </table>
     <p style="color:var(--sub);font-size:12.5px;margin-top:5px;">
-      ${c.pyeong!=null?`평당 월세 약 ${c.pyeong.toFixed(1)}만원 · `:''}목표 기준(보증금 3,500 / 월세 200): ${gradeLabel[c.grade]}
+      ${s.owner?'자가 건물이라 보증금·월세 부담이 없습니다. 아래 고정비는 관리비·기타 비용 기준입니다.'
+        :`${c.pyeong!=null?`평당 월세 약 ${c.pyeong.toFixed(1)}만원 · `:''}목표 기준(보증금 3,500 / 월세 200): ${gradeLabel[c.grade]}`}
       ${s.nego==='yes'?' · 월세 협상 가능':s.nego==='no'?' · 월세 협상 불가':''}
     </p>
 
@@ -2627,6 +2701,27 @@ function reportParts(s,c,forPdf){
     <div class="rp-sec">3. 건물 평가 (${c.bldScore}/100)</div>
     <div class="bld-grid">${bldRows}</div>
     <p style="color:var(--sub);font-size:12.5px;margin-top:5px;">엘리베이터 ${s.elev==='y'?'있음':'없음'} · 주차 ${s.park==='y'?'가능':'불가'} · 24시간 운영 ${s.h24==='y'?'가능':s.h24==='n'?'불가':'미확인'}</p>
+
+    ${(()=>{
+      const rows = demandCheck(s).filter(r=>r.v != null);
+      if(!rows.length) return '';
+      const fail = rows.filter(r=>!r.ok).length;
+      return `<div class="rp-sec">3-1. 배후 수요 · 접근성 합격 기준</div>
+        <table class="mini">
+          <tr><th>항목</th><th class="num">측정값</th><th class="num">기준</th><th class="num">판정</th></tr>
+          ${rows.map(r=>{
+            const want = r.min != null ? `${r.min.toLocaleString()}${r.unit} 이상` : `${r.max.toLocaleString()}${r.unit} 이하`;
+            return `<tr><td>${esc(r.label)} <small style="color:var(--sub);">${esc(r.src)}</small></td>
+              <td class="num">${r.v.toLocaleString()}${esc(r.unit)}</td>
+              <td class="num" style="color:var(--sub);">${want}</td>
+              <td class="num" style="color:${r.ok?'var(--green)':'#CE4A36'};font-weight:700;">${r.ok?'통과':'미달'}</td></tr>`;
+          }).join('')}
+        </table>
+        <p style="color:var(--sub);font-size:12.5px;margin-top:5px;">
+          ${fail===0?'측정한 항목이 모두 기준을 넘었습니다.':`${fail}개 항목이 기준 미달입니다. 다른 강점이 이를 보완하는지 함께 보세요.`}
+          ${s.subwayName?` · 최인접역 ${esc(s.subwayName)}`:''}
+        </p>`;
+    })()}
 
     <div class="rp-sec">4. 경쟁업체 동향 (점유율 높은 순)</div>
     ${(()=>{
@@ -2811,7 +2906,9 @@ function reportText(s,c){
   }
   lines.push(``);
   lines.push(`1. 임대 조건`);
-  lines.push(`- 보증금 ${won(s.deposit)} / 월세 ${won(s.rent)} / 관리비 ${won(s.mgmt??0)} / 권리금 ${won(s.premium??0)}`);
+  lines.push(s.owner
+    ? `- 건물주 소유 (자가) — 보증금·월세 없음 / 관리비 ${won(s.mgmt??0)} / 권리금 ${won(s.premium??0)}`
+    : `- 보증금 ${won(s.deposit)} / 월세 ${won(s.rent)} / 관리비 ${won(s.mgmt??0)} / 권리금 ${won(s.premium??0)}`);
   lines.push(`- 월 총고정비 ${won(c.fixed)}${c.pyeong!=null?` (평당 월세 약 ${c.pyeong.toFixed(1)}만)`:''}`);
   lines.push(``);
   lines.push(`2. 상권 (반경 약 500m)`);
@@ -2836,6 +2933,32 @@ function reportText(s,c){
   lines.push(`3. 건물 (${c.bldScore}/100)`);
   lines.push('- ' + BLD_ITEMS.map(it=>`${it.label.split(' (')[0]} ${bldValLabel(it,b[it.key])}`).join(' / '));
   lines.push(`- 엘리베이터 ${s.elev==='y'?'O':'X'} / 주차 ${s.park==='y'?'O':'X'} / 24시간 ${s.h24==='y'?'가능':s.h24==='n'?'불가':'미확인'}`);
+  const dmd = demandCheck(s).filter(r=>r.v != null);
+  if(dmd.length){
+    lines.push(``);
+    lines.push(`배후 수요 · 접근성 (${dmd.filter(r=>r.ok).length}/${dmd.length} 통과)`);
+    dmd.forEach(r=>{
+      const want = r.min != null ? `${r.min.toLocaleString()}${r.unit} 이상` : `${r.max.toLocaleString()}${r.unit} 이하`;
+      lines.push(`- ${r.label} ${r.v.toLocaleString()}${r.unit} (기준 ${want}) → ${r.ok?'통과':'미달'}`);
+    });
+  }
+
+  const acq = acqCalc(s);
+  if(acq){
+    lines.push(``);
+    lines.push(`인수 수익성 (기존 월매출 ${won(s.revenue)} 기준)`);
+    lines.push(`- 총고정비 ${won(Math.round(acq.fixed))}/월 | 월 수익금 ${won(Math.round(acq.profit))}${acq.margin!=null?` (수익률 ${(acq.margin*100).toFixed(1)}%)`:''}`);
+    lines.push(`- 총 투자비 ${won(Math.round(acq.invest))} | 회수 ${acq.payback!=null?acq.payback.toFixed(1)+'개월':'계산 불가'}`);
+    if(acq.perSeat!=null) lines.push(`- 좌석당 매출 ${won(Math.round(acq.perSeat))}/월${acq.age!=null?` | 사용연수 ${acq.age}년`:''}`);
+  }
+
+  if(s.agency || s.agencyTel || s.listingUrl){
+    lines.push(``);
+    lines.push(`매물 출처`);
+    if(s.agency || s.agencyTel) lines.push(`- ${s.agency||'부동산'}${s.agencyTel?` | ${s.agencyTel}`:''}${s.listedAt?` | 확인 ${s.listedAt}`:''}`);
+    if(s.listingUrl) lines.push(`- 매물 링크 : ${s.listingUrl}`);
+  }
+
   const cmpRows = competitorRows(s);
   if(cmpRows.length){
     lines.push(``);
@@ -2921,6 +3044,17 @@ function openForm(id){
   const set = (fid,v)=>{ const el=document.getElementById(fid); if(el) el.value = v==null?'':v; };
   set('f_name', s?.name); set('f_addr', s?.addr); set('f_floor', s?.floor); set('f_area', s?.area);
   set('f_deposit', s?.deposit); set('f_rent', s?.rent); set('f_mgmt', s?.mgmt); set('f_premium', s?.premium); set('f_etc', s?.etc);
+  const ow = document.getElementById('f_owner'); if(ow) ow.checked = !!(s && s.owner);
+  toggleOwner();
+  set('f_revenue', s?.revenue); set('f_seats', s?.seats); set('f_openYear', s?.openYear);
+  set('f_labor', s?.labor); set('f_material', s?.material); set('f_fixture', s?.fixture);
+  set('f_pop10', s?.pop10); set('f_pop20', s?.pop20);
+  set('f_flow10', s?.flow10); set('f_flow20', s?.flow20);
+  set('f_apt', s?.apt); set('f_compRev', s?.compRev);
+  set('f_distSubway', s?.distSubway); set('f_distCore', s?.distCore);
+  set('f_subwayName', s?.subwayName); set('f_aptPrice', s?.aptPrice);
+  set('f_agency', s?.agency); set('f_agencyTel', s?.agencyTel);
+  set('f_listingUrl', s?.listingUrl); set('f_listedAt', s?.listedAt);
   set('f_nego', s?.nego||'unknown'); set('f_elev', s?.elev||'y'); set('f_park', s?.park||'y'); set('f_h24', s?.h24||'unknown');
   set('f_hs', s?.hs); set('f_ms', s?.ms);
   set('f_academy', s?.academy); set('f_students', s?.students); set('f_comp', s?.comp); set('f_closed', s?.closed); set('f_avgyears', s?.avgyears);
@@ -2944,8 +3078,20 @@ function formData(){
   return {
     name: g('f_name').trim(), addr: g('f_addr').trim(),
     floor: num(g('f_floor')), area: num(g('f_area')),
-    deposit: num(g('f_deposit')), rent: num(g('f_rent')), mgmt: num(g('f_mgmt')),
+    owner: !!document.getElementById('f_owner')?.checked,
+    deposit: document.getElementById('f_owner')?.checked ? 0 : num(g('f_deposit')),
+    rent:    document.getElementById('f_owner')?.checked ? 0 : num(g('f_rent')),
+    mgmt: num(g('f_mgmt')),
     premium: num(g('f_premium')), etc: num(g('f_etc')), nego: g('f_nego'),
+    revenue: num(g('f_revenue')), seats: num(g('f_seats')), openYear: num(g('f_openYear')),
+    labor: num(g('f_labor')), material: num(g('f_material')), fixture: num(g('f_fixture')),
+    pop10: num(g('f_pop10')), pop20: num(g('f_pop20')),
+    flow10: num(g('f_flow10')), flow20: num(g('f_flow20')),
+    apt: num(g('f_apt')), compRev: num(g('f_compRev')),
+    distSubway: num(g('f_distSubway')), distCore: num(g('f_distCore')),
+    subwayName: g('f_subwayName').trim(), aptPrice: num(g('f_aptPrice')),
+    agency: g('f_agency').trim(), agencyTel: g('f_agencyTel').trim(),
+    listingUrl: g('f_listingUrl').trim(), listedAt: g('f_listedAt'),
     elev: g('f_elev'), park: g('f_park'), h24: g('f_h24'),
     hs: num(g('f_hs')), ms: num(g('f_ms')),
     academy: num(g('f_academy')), students: num(g('f_students')), comp: num(g('f_comp')),
@@ -2953,6 +3099,179 @@ function formData(){
     bld, note: g('f_note').trim()
   };
 }
+/* ═══════════════════════════════════════════════════════════
+   앤딩 매물 합격 기준
+   전용 35평 이상 / 평단가는 전용 40평 월세 250만원 기준으로 환산.
+   평단가 = (월세 + 관리비) ÷ 전용평수  →  6.25만원/평 이하면 통과.
+   기준을 바꾸려면 아래 FIT_RULE 숫자만 고치면 됩니다.
+   ═══════════════════════════════════════════════════════════ */
+const FIT_RULE = { minArea: 35, maxPerPyeong: 6.25, refArea: 40, refRent: 250 };
+
+function fitCheck(d){
+  const area = d.area, rent = d.rent, mgmt = d.mgmt || 0;
+  const rows = [];
+  if(d.owner){
+    rows.push({ k:'임대 형태', v:'건물주 소유 (자가)', ok:true, note:'보증금·월세 부담 없음' });
+    rows.push(area == null
+      ? { k:'전용면적', v:'미입력', ok:null, note:`${FIT_RULE.minArea}평 이상` }
+      : { k:'전용면적', v:`${area}평`, ok: area >= FIT_RULE.minArea, note:`${FIT_RULE.minArea}평 이상` });
+    if(mgmt) rows.push({ k:'관리비', v:won(mgmt)+'/월', ok:null, note:'고정비에 반영됩니다' });
+    return rows;
+  }
+
+  // 1) 전용면적
+  rows.push(area == null
+    ? { k:'전용면적', v:'미입력', ok:null, note:`${FIT_RULE.minArea}평 이상` }
+    : { k:'전용면적', v:`${area}평`, ok: area >= FIT_RULE.minArea, note:`${FIT_RULE.minArea}평 이상` });
+
+  // 2) 평단가 (관리비 포함)
+  if(area && area > 0 && rent != null){
+    const per = (rent + mgmt) / area;
+    rows.push({ k:'평단가 (관리비 포함)', v:`${per.toFixed(2)}만원/평`,
+      ok: per <= FIT_RULE.maxPerPyeong, note:`${FIT_RULE.maxPerPyeong}만원/평 이하` });
+    // 3) 이 평수에서 허용되는 월세 상한
+    const cap = Math.round(area * FIT_RULE.maxPerPyeong - mgmt);
+    rows.push({ k:'월세 상한 (이 평수 기준)', v:`${won(rent)}`,
+      ok: rent <= cap, note:`${won(cap)} 이하` });
+  }else{
+    rows.push({ k:'평단가 (관리비 포함)', v:'계산 불가', ok:null, note:'전용면적·월세 필요' });
+  }
+  return rows;
+}
+
+function renderFit(d){
+  const box = document.getElementById('fitBox');
+  if(!box) return;
+  const rows = fitCheck(d);
+  const judged = rows.filter(r=>r.ok !== null);
+  const pass = judged.length && judged.every(r=>r.ok);
+  const fail = judged.some(r=>r.ok === false);
+  const col = !judged.length ? 'var(--sub)' : pass ? 'var(--green)' : 'var(--red)';
+  const head = !judged.length ? '전용면적과 월세를 넣으면 기준 통과 여부가 바로 나옵니다'
+             : pass ? '✅ 앤딩 매물 기준 통과' : '⚠️ 기준 미달 — 협상이 필요합니다';
+  box.innerHTML = `<div style="border:1px solid ${col};border-radius:10px;padding:11px 13px;">
+    <div style="font-size:13px;font-weight:700;color:${col};margin-bottom:8px;">${head}</div>
+    ${rows.map(r=>{
+      const mark = r.ok === null ? '·' : r.ok ? '✓' : '✕';
+      const c = r.ok === null ? 'var(--sub)' : r.ok ? 'var(--green)' : 'var(--red)';
+      return `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0;">
+        <span style="color:var(--sub);min-width:150px;">${mark} ${esc(r.k)}</span>
+        <b style="color:${c};">${esc(r.v)}</b>
+        <span style="color:var(--sub);font-size:11.5px;text-align:right;flex:1;">기준 ${esc(r.note)}</span>
+      </div>`;
+    }).join('')}
+    ${fail ? `<div style="font-size:11.5px;color:var(--sub);margin-top:7px;">기준을 넘더라도 수요가 아주 좋으면 검토 대상이 됩니다. 월세 협상 여지를 먼저 확인해 보세요.</div>` : ''}
+  </div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   인수창업 수익성 역산
+   총고정비 = 월세 + 관리비 + 기타 고정비 + 인건비 + 재료비
+   수익금   = 기존 월매출 − 총고정비
+   투자비   = 보증금 + 권리금 + 시설 인수비
+   수익률   = 수익금 ÷ 기존 월매출
+   ROI      = 수익금 ÷ 투자비  (월 기준 → 회수 개월 = 투자비 ÷ 수익금)
+   ═══════════════════════════════════════════════════════════ */
+function acqCalc(d){
+  const rev = d.revenue;
+  if(rev == null || !rev) return null;
+  const fixed = (d.rent||0) + (d.mgmt||0) + (d.etc||0) + (d.labor||0) + (d.material||0);
+  const profit = rev - fixed;
+  const invest = (d.deposit||0) + (d.premium||0) + (d.fixture||0);
+  const margin = rev > 0 ? profit / rev : null;
+  const roi    = invest > 0 ? profit / invest : null;
+  const payback= (profit > 0 && invest > 0) ? invest / profit : null;
+  const perSeat= (d.seats && d.seats > 0) ? rev / d.seats : null;
+  const age    = d.openYear ? (new Date().getFullYear() - d.openYear) : null;
+  return { fixed, profit, invest, margin, roi, payback, perSeat, age };
+}
+function renderAcq(d){
+  const box = document.getElementById('acqBox'); if(!box) return;
+  const a = acqCalc(d);
+  if(!a){ box.innerHTML = '<div style="font-size:12px;color:var(--sub);">기존 월매출을 넣으면 수익금·회수기간이 계산됩니다.</div>'; return; }
+  const good = a.profit > 0 && a.payback != null && a.payback <= 36;
+  const col = a.profit <= 0 ? 'var(--red)' : good ? 'var(--green)' : 'var(--amber)';
+  const head = a.profit <= 0 ? '⚠️ 월 적자 구조입니다'
+             : good ? `✅ 월 ${won(Math.round(a.profit))} · 투자금 ${a.payback.toFixed(1)}개월 회수`
+                    : `△ 월 ${won(Math.round(a.profit))} · 회수 ${a.payback!=null?a.payback.toFixed(1)+'개월':'계산 불가'}`;
+  const row = (k,v,sub)=>`<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0;">
+      <span style="color:var(--sub);min-width:120px;">${k}</span><b>${v}</b>
+      <span style="color:var(--sub);font-size:11.5px;text-align:right;flex:1;">${sub||''}</span></div>`;
+  box.innerHTML = `<div style="border:1px solid ${col};border-radius:10px;padding:11px 13px;">
+    <div style="font-size:13px;font-weight:700;color:${col};margin-bottom:8px;">${head}</div>
+    ${row('총고정비', won(Math.round(a.fixed)) + '/월', '월세+관리비+기타+인건비+재료비')}
+    ${row('월 수익금', won(Math.round(a.profit)), a.margin!=null?`수익률 ${(a.margin*100).toFixed(1)}%`:'')}
+    ${row('총 투자비', won(Math.round(a.invest)), '보증금+권리금+시설 인수비')}
+    ${row('투자금 회수', a.payback!=null?`${a.payback.toFixed(1)}개월`:'—', a.roi!=null?`월 ROI ${(a.roi*100).toFixed(2)}%`:'')}
+    ${a.perSeat!=null?row('좌석당 매출', won(Math.round(a.perSeat)) + '/월', '좌석 효율 비교용'):''}
+    ${a.age!=null?row('사용 연수', `${a.age}년`, a.age < 5 ? '기준 5년 미만 ✓' : '기준 5년 미만 ✕ — 시설 노후 확인'):''}
+    <div style="font-size:11.5px;color:var(--sub);margin-top:7px;">매도자 제시 매출은 검증이 필요합니다. 카드 매출 자료나 현장 이용 현황으로 교차 확인하세요.</div>
+  </div>`;
+}
+
+/* 건물주(자가)면 보증금·월세 칸을 숨기고 0으로 처리합니다.
+   관리비·권리금·기타 고정비는 그대로 입력받습니다. */
+/* ═══════════════════════════════════════════════════════════
+   앤딩 합격 기준 — 배후 수요 · 접근성
+   과제 파일의 기준선을 그대로 옮겼습니다. 숫자만 고치면 기준이 바뀝니다.
+   ═══════════════════════════════════════════════════════════ */
+const DEMAND_RULE = [
+  { key:'pop10',      label:'주거 10대',      min:2000, unit:'명',  src:'소상공인365' },
+  { key:'pop20',      label:'주거 20대',      min:2000, unit:'명',  src:'소상공인365' },
+  { key:'apt',        label:'아파트 세대수',   min:3000, unit:'세대', src:'오픈업' },
+  { key:'compRev',    label:'경쟁사 평균 매출', min:500,  unit:'만원', src:'오픈업' },
+  { key:'distSubway', label:'지하철역 거리',   max:500,  unit:'m',   src:'네이버지도' },
+  { key:'distCore',   label:'중심상권 거리',   max:500,  unit:'m',   src:'네이버지도' },
+  { key:'comp',       label:'반경 600m 경쟁사', max:10,   unit:'곳',  src:'네이버지도' }
+];
+function demandCheck(d){
+  return DEMAND_RULE.map(r=>{
+    const v = d[r.key];
+    if(v == null || v === '') return { ...r, v:null, ok:null };
+    const ok = r.min != null ? v >= r.min : v <= r.max;
+    return { ...r, v, ok };
+  });
+}
+function renderDemand(d){
+  const box = document.getElementById('demandBox'); if(!box) return;
+  const rows = demandCheck(d);
+  const judged = rows.filter(r=>r.ok !== null);
+  const pass = judged.filter(r=>r.ok).length;
+  const fail = judged.filter(r=>!r.ok).length;
+  const col = !judged.length ? 'var(--sub)' : fail === 0 ? 'var(--green)'
+            : fail <= 2 ? 'var(--amber, #B8860B)' : 'var(--red)';
+  const head = !judged.length ? '값을 넣으면 항목마다 합격 여부가 표시됩니다'
+    : fail === 0 ? `✅ 기준 ${judged.length}개 항목 모두 통과`
+    : `${pass}개 통과 · ${fail}개 미달 — 미달 항목을 다른 강점이 보완하는지 보세요`;
+  box.innerHTML = `<div style="border:1px solid ${col};border-radius:10px;padding:11px 13px;">
+    <div style="font-size:13px;font-weight:700;color:${col};margin-bottom:8px;">${head}</div>
+    ${rows.map(r=>{
+      const mark = r.ok === null ? '·' : r.ok ? '✓' : '✕';
+      const c = r.ok === null ? 'var(--sub)' : r.ok ? 'var(--green)' : 'var(--red)';
+      const want = r.min != null ? `${r.min.toLocaleString()}${r.unit} 이상` : `${r.max.toLocaleString()}${r.unit} 이하`;
+      return `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0;">
+        <span style="color:var(--sub);min-width:132px;">${mark} ${esc(r.label)}</span>
+        <b style="color:${c};min-width:76px;text-align:right;">${r.v!=null?r.v.toLocaleString()+r.unit:'미입력'}</b>
+        <span style="color:var(--sub);font-size:11.5px;text-align:right;flex:1;">기준 ${want} · ${esc(r.src)}</span>
+      </div>`;
+    }).join('')}
+    ${judged.length < rows.length ? `<div style="font-size:11.5px;color:var(--sub);margin-top:7px;">미입력 ${rows.length-judged.length}개 — 채울수록 판정이 정확해집니다.</div>` : ''}
+  </div>`;
+}
+
+function toggleOwner(){
+  const on = !!document.getElementById('f_owner')?.checked;
+  ['wrap_deposit','wrap_rent'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.style.display = on ? 'none' : '';
+  });
+  if(on){
+    const d = document.getElementById('f_deposit'), r = document.getElementById('f_rent');
+    if(d) d.value = ''; if(r) r.value = '';
+  }
+  if(typeof liveCalc === 'function') liveCalc();
+}
+
 function liveCalc(){
   const c = calc(formData());
   document.getElementById('lv_fixed').textContent = won(c.fixed) + '/월';
@@ -2962,11 +3281,15 @@ function liveCalc(){
   const gEl = document.getElementById('lv_grade');
   gEl.style.background = c.grade==='green'?'var(--green)':c.grade==='amber'?'var(--amber)':'var(--red)';
   document.getElementById('lv_gradeText').textContent = gradeLabel[c.grade].split(' · ')[0];
+  const fd = formData();
+  renderFit(fd);
+  renderAcq(fd);
+  renderDemand(fd);
 }
 async function saveSite(){
   const d = formData();
   if(!d.name){ notify('건물명 / 별칭을 입력해 주세요.'); return; }
-  if(d.deposit==null || d.rent==null){ notify('보증금과 월세는 필수입니다.'); return; }
+  if(!d.owner && (d.deposit==null || d.rent==null)){ notify('보증금과 월세는 필수입니다. 자가 건물이면 「건물주 소유」를 체크해 주세요.'); return; }
   let target;
   if(editingId){
     target = sites.find(x=>x.id===editingId);
@@ -3015,7 +3338,22 @@ async function saveSite(){
 /* ============================================================
    조사 메뉴 (regions / cafes) — Firestore 실시간
    ============================================================ */
-const VENDORS = ['미확인','ZONE공','고스카','SSAMCAFE','스터디모아','스터디큐브','와우플','제로아이즈','픽코','기타'];
+const VENDORS = ['미확인','ZONE공','고스카','SSAMCAFE','스터디모아','스터디큐브','와우플','제로아이즈','픽코',
+  '컴앤패스','플랜에이','멘토즈','시너지','타임유','데일리','디딤G','자체앱','앱없음','기타'];
+/* 엑셀에 적힌 앱 이름을 위 목록으로 맞춰 줍니다 */
+const VENDOR_ALIAS = {
+  'ssam_café':'SSAMCAFE','ssam_cafe':'SSAMCAFE','ssamcafé':'SSAMCAFE','쌈카페':'SSAMCAFE',
+  '스터디_큐브':'스터디큐브','스터디_모아':'스터디모아','zone공':'ZONE공','존공':'ZONE공',
+  '디딤_g':'디딤G','디딤g':'디딤G','x':'앱없음','없음':'앱없음','-':'미확인'
+};
+function normVendor(v){
+  const raw = String(v||'').trim();
+  if(!raw) return '미확인';
+  const key = raw.toLowerCase().replace(/\s+/g,'');
+  if(VENDOR_ALIAS[key]) return VENDOR_ALIAS[key];
+  const hit = VENDORS.find(x=>x.toLowerCase().replace(/\s+/g,'') === key);
+  return hit || '기타';
+}
 let regions = [], cafes = [];
 let unsubRegions = null, unsubCafes = null;
 let curTab = 'site';
@@ -3121,18 +3459,314 @@ function vendorTag(v){
   return v;
 }
 
+/* ═══════════════════════════════════════════════════════════
+   매물 관리 — 지역별 검색 조건을 저장하고, 찾은 매물을 쌓아 관리합니다.
+   매물 수집은 사람이 합니다. 자동 수집은 하지 않습니다.
+   ═══════════════════════════════════════════════════════════ */
+let deals = [], dealAreas = [], unsubDeals = null, unsubDealAreas = null;
+let dealAreaId = '', dealSort = 'per', dealFilter = 'all', dealEditId = null;
+
+const DEAL_KINDS = ['일반상가','복합상가','단지내상가','오피스','기타'];
+const RECHECK_DAYS = 14;   // 확인한 지 이 일수가 지나면 재확인 표시
+
+const todayStr = () => new Date().toISOString().slice(0,10);
+const daysSince = d => {
+  if(!d) return null;
+  const t = Date.parse(d + 'T00:00:00');
+  return isNaN(t) ? null : Math.floor((Date.now() - t) / 86400000);
+};
+/* 매물 판정 — 후보지와 같은 FIT_RULE 을 씁니다 */
+function dealPer(d){
+  const a = Number(d.area), r = Number(d.rent), m = Number(d.mgmt) || 0;
+  if(!a || a <= 0 || !r) return null;
+  return (r + m) / a;
+}
+function dealVerdict(d){
+  const per = dealPer(d);
+  if(per == null || !d.area) return { ok:null, per, txt:'정보 부족' };
+  const okArea = Number(d.area) >= FIT_RULE.minArea;
+  const okPer  = per <= FIT_RULE.maxPerPyeong;
+  return { ok: okArea && okPer, per,
+    txt: !okArea ? `전용 ${FIT_RULE.minArea}평 미만` : okPer ? '기준 통과' : '평단가 초과' };
+}
+/* 네이버 부동산 검색 페이지를 조건과 함께 엽니다 (매물을 가져오지는 않습니다) */
+function openNaverLand(areaId){
+  const a = dealAreas.find(x=>x.id===areaId);
+  const q = encodeURIComponent(((a && a.name) || '') + ' 상가 월세');
+  window.open('https://m.land.naver.com/search/result/' + q, '_blank', 'noopener');
+}
+
+function renderDeals(){
+  const v = document.getElementById('dealView');
+  if(!dealAreaId && dealAreas.length) dealAreaId = dealAreas[0].id;
+  const area = dealAreas.find(a=>a.id===dealAreaId);
+
+  if(!dealAreas.length){
+    v.innerHTML = `<header style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div><h1>매물 관리</h1><div class="sv-sub">지역별 검색 조건을 저장하고, 찾은 매물을 모아 기준 통과 여부를 관리합니다.</div></div>
+        <button class="btn btn-primary" onclick="addDealArea()">+ 지역 추가</button>
+      </header>
+      <div class="empty"><div class="big">🏢</div><p>아직 등록된 지역이 없어요.<br>검색할 지역을 추가하면 조건을 저장해 두고 반복해서 쓸 수 있습니다.</p>
+      <button class="btn btn-primary" onclick="addDealArea()">첫 지역 추가하기</button></div>`;
+    return;
+  }
+
+  const mine = deals.filter(d=>d.areaId===dealAreaId);
+  const judged = mine.map(d=>({ d, v:dealVerdict(d), age:daysSince(d.checkedAt) }));
+  const passN = judged.filter(x=>x.v.ok===true).length;
+  const oldN  = judged.filter(x=>x.age!=null && x.age>=RECHECK_DAYS).length;
+  const pers  = judged.map(x=>x.v.per).filter(x=>x!=null);
+  const avgPer = pers.length ? (pers.reduce((a,b)=>a+b,0)/pers.length) : null;
+
+  let rows = judged.filter(x=>
+    dealFilter==='pass' ? x.v.ok===true :
+    dealFilter==='recheck' ? (x.age!=null && x.age>=RECHECK_DAYS) : true);
+  rows.sort((a,b)=>
+    dealSort==='rent' ? (a.d.rent||1e9)-(b.d.rent||1e9) :
+    dealSort==='recent' ? String(b.d.checkedAt||'').localeCompare(String(a.d.checkedAt||'')) :
+    (a.v.per==null?1e9:a.v.per)-(b.v.per==null?1e9:b.v.per));
+
+  v.innerHTML = `
+    <header style="display:flex;justify-content:space-between;align-items:flex-start;">
+      <div><h1>매물 관리</h1><div class="sv-sub">매물은 직접 찾아 등록합니다. 판정·추적은 명당이 합니다.</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+        <button class="btn btn-ghost btn-sm" onclick="addDealArea()">+ 지역</button>
+        <button class="btn btn-primary" onclick="openDealForm()">+ 매물 등록</button>
+      </div>
+    </header>
+
+    <div class="toolbar" style="margin-bottom:10px;">
+      ${dealAreas.map(a=>`<button class="chip ${a.id===dealAreaId?'active':''}" onclick="setDealArea('${a.id}')">${esc(a.name)} <b>${deals.filter(d=>d.areaId===a.id).length}</b></button>`).join('')}
+    </div>
+
+    <div class="form-card" style="padding:14px 16px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div style="font-size:16px;font-weight:700;">🏢 ${esc(area?area.name:'')}</div>
+          <div style="font-size:12px;color:var(--sub);margin-top:3px;">검색 조건 : ${esc(area?.cond || `전용 ${FIT_RULE.minArea}평 이상 · 2층 이상`)}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-ghost btn-sm" onclick="openNaverLand('${dealAreaId}')">🔎 네이버 부동산에서 찾기</button>
+          <button class="btn btn-ghost btn-sm" onclick="editDealArea('${dealAreaId}')">조건 수정</button>
+        </div>
+      </div>
+      <div class="totals" style="margin-top:12px;">
+        <div class="tstat"><b>${mine.length}</b><span>등록 매물</span></div>
+        <div class="tstat"><b>${passN}</b><span>✅ 기준 통과</span></div>
+        <div class="tstat"><b>${oldN}</b><span>⏳ 재확인 필요</span></div>
+        <div class="tstat"><b>${avgPer!=null?avgPer.toFixed(2):'—'}</b><span>평균 평단가</span></div>
+      </div>
+    </div>
+
+    <div class="toolbar" style="margin:12px 0 6px;">
+      <span style="font-size:12px;color:var(--sub);align-self:center;margin-right:2px;">보기</span>
+      <button class="chip ${dealFilter==='all'?'active':''}" onclick="setDealFilter('all')">전체</button>
+      <button class="chip ${dealFilter==='pass'?'active':''}" onclick="setDealFilter('pass')">✅ 통과만</button>
+      <button class="chip ${dealFilter==='recheck'?'active':''}" onclick="setDealFilter('recheck')">⏳ 재확인</button>
+      <span style="font-size:12px;color:var(--sub);align-self:center;margin:0 2px 0 10px;">정렬</span>
+      <button class="chip ${dealSort==='per'?'active':''}" onclick="setDealSort('per')">평단가 낮은 순</button>
+      <button class="chip ${dealSort==='rent'?'active':''}" onclick="setDealSort('rent')">월세 낮은 순</button>
+      <button class="chip ${dealSort==='recent'?'active':''}" onclick="setDealSort('recent')">최근 확인 순</button>
+    </div>
+
+    ${rows.length ? rows.map(({d,v:vd,age})=>{
+      const col = vd.ok===true?'var(--green)':vd.ok===false?'var(--red)':'var(--sub)';
+      const old = age!=null && age>=RECHECK_DAYS;
+      return `<div class="v-card" style="border-left:4px solid ${col};margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <div>
+            <div style="font-weight:700;font-size:14.5px;">
+              ${vd.ok===true?'✅':vd.ok===false?'⚠️':'·'} ${esc(d.kind||'상가')} · ${d.floor?esc(d.floor)+'층':'층 미상'}
+              ${d.title?`<span style="color:var(--sub);font-weight:400;"> ${esc(d.title)}</span>`:''}
+            </div>
+            <div style="font-size:12.5px;color:var(--sub);margin-top:3px;">
+              전용 ${d.area??'—'}평${d.supply?` (공급 ${d.supply}평)`:''} · 보증금 ${won(d.deposit)} · 월세 ${won(d.rent)}${d.mgmt?` + 관리비 ${won(d.mgmt)}`:''}
+            </div>
+            ${d.memo?`<div style="font-size:12px;color:var(--sub);margin-top:4px;">${esc(d.memo)}</div>`:''}
+          </div>
+          <div style="text-align:right;min-width:112px;">
+            <div style="font-size:18px;font-weight:800;color:${col};">${vd.per!=null?vd.per.toFixed(2):'—'}</div>
+            <div style="font-size:11px;color:var(--sub);">만원/평 · ${esc(vd.txt)}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;align-items:center;">
+          <span style="font-size:11.5px;color:${old?'var(--red)':'var(--sub)'};">
+            ${d.checkedAt?`확인 ${esc(d.checkedAt.slice(5))}${age!=null?` · ${age}일 경과`:''}`:'확인일 없음'}${old?' — 아직 있는지 확인하세요':''}
+          </span>
+          <span style="flex:1;"></span>
+          ${d.url?`<a class="btn btn-ghost btn-sm" href="${esc(d.url)}" target="_blank" rel="noopener">🔗 매물</a>`:''}
+          ${d.tel?`<a class="btn btn-ghost btn-sm" href="tel:${esc(String(d.tel).replace(/[^0-9+]/g,''))}">📞 ${esc(d.agency||'부동산')}</a>`:''}
+          <button class="btn btn-ghost btn-sm" onclick="touchDeal('${d.id}')">오늘 확인</button>
+          <button class="btn btn-ghost btn-sm" onclick="openDealForm('${d.id}')">수정</button>
+          <button class="btn btn-ghost btn-sm" onclick="dealToSite('${d.id}')" style="color:var(--teal);">후보지로 보내기 →</button>
+        </div>
+      </div>`;
+    }).join('') : `<div class="empty"><div class="big">🏢</div><p>${mine.length?'이 조건에 맞는 매물이 없어요.':'아직 등록된 매물이 없어요.<br>「네이버 부동산에서 찾기」로 매물을 본 뒤, 평수와 월세만 넣어 등록하세요.'}</p></div>`}
+
+    <div style="font-size:11.5px;color:var(--sub);margin-top:14px;">
+      매물 정보는 직접 보고 입력한 내용만 저장됩니다. 외부 사이트에서 자동으로 가져오지 않습니다.
+    </div>`;
+}
+function setDealArea(id){ dealAreaId=id; renderDeals(); }
+function setDealFilter(f){ dealFilter=f; renderDeals(); }
+function setDealSort(v){ dealSort=v; renderDeals(); }
+
+async function addDealArea(){
+  const name = prompt('검색할 지역을 입력하세요\n예: 서울 양천구 목동');
+  if(!name || !name.trim()) return;
+  const cond = prompt('검색 조건을 적어두세요 (기록용)', `전용 ${FIT_RULE.minArea}평 이상 · 2층 이상`) || '';
+  const id = 'da' + Date.now();
+  await db.collection('dealAreas').doc(id).set({ id, name:name.trim(), cond:cond.trim(), order:(dealAreas.length+1)*10 });
+  dealAreaId = id;
+  notify(`${name.trim()} 지역을 추가했어요.`);
+}
+async function editDealArea(id){
+  const a = dealAreas.find(x=>x.id===id); if(!a) return;
+  const cond = prompt(`${a.name} 검색 조건`, a.cond || '');
+  if(cond === null) return;
+  await db.collection('dealAreas').doc(id).set({ ...a, cond:cond.trim() });
+}
+async function touchDeal(id){
+  const d = deals.find(x=>x.id===id); if(!d) return;
+  await db.collection('deals').doc(id).set({ ...d, checkedAt: todayStr() });
+  notify('오늘 확인으로 기록했어요.');
+}
+/* 매물 → 후보지 등록 화면으로 값을 넘깁니다 */
+function dealToSite(id){
+  const d = deals.find(x=>x.id===id); if(!d) return;
+  switchTab('site');
+  openForm();
+  setTimeout(()=>{
+    const set=(k,v)=>{ const el=document.getElementById(k); if(el && v!=null && v!=='') el.value=v; };
+    const a = dealAreas.find(x=>x.id===d.areaId);
+    set('f_name', `${a?a.name+' ':''}${d.kind||'상가'} ${d.floor?d.floor+'층':''}`.trim());
+    set('f_floor', d.floor); set('f_area', d.area);
+    set('f_deposit', d.deposit); set('f_rent', d.rent); set('f_mgmt', d.mgmt);
+    set('f_agency', d.agency); set('f_agencyTel', d.tel);
+    set('f_listingUrl', d.url); set('f_listedAt', d.checkedAt);
+    if(typeof liveCalc === 'function') liveCalc();
+    notify('매물 정보를 후보지 등록 화면으로 옮겼어요. 나머지를 채워 주세요.');
+  }, 120);
+}
 function switchTab(tab){
   curTab = tab;
   document.getElementById('tab-survey').classList.toggle('active', tab==='survey');
   document.getElementById('tab-site').classList.toggle('active', tab==='site');
+  document.getElementById('tab-deal').classList.toggle('active', tab==='deal');
   // 후보지 하위 화면 닫기
   document.getElementById('formView').style.display='none';
   document.getElementById('reportView').style.display='none';
   document.getElementById('compareView').style.display='none';
   document.getElementById('listView').style.display = tab==='site' ? 'block' : 'none';
   document.getElementById('surveyView').style.display = tab==='survey' ? 'block' : 'none';
+  document.getElementById('dealView').style.display = tab==='deal' ? 'block' : 'none';
   try{ localStorage.setItem('sc-lasttab', tab); }catch(e){}
-  if(tab==='survey') renderSurvey(); else render();
+  if(tab==='survey') renderSurvey();
+  else if(tab==='deal') renderDeals();
+  else render();
+}
+
+function subscribeDeals(){
+  if(unsubDeals || unsubDealAreas) return;
+  unsubDealAreas = db.collection('dealAreas').onSnapshot(snap=>{
+    const arr=[]; snap.forEach(d=>arr.push(d.data()));
+    arr.sort((a,b)=>(a.order||0)-(b.order||0) || (a.name>b.name?1:-1));
+    dealAreas = arr;
+    if(curTab==='deal') renderDeals();
+  }, e=>console.error('dealAreas', e));
+  unsubDeals = db.collection('deals').onSnapshot(snap=>{
+    const arr=[]; snap.forEach(d=>arr.push(d.data()));
+    deals = arr;
+    if(curTab==='deal') renderDeals();
+  }, e=>console.error('deals', e));
+}
+
+/* 매물 등록·수정 — 모달 */
+function openDealForm(id){
+  if(!dealAreas.length){ notify('먼저 지역을 추가해 주세요.'); return; }
+  dealEditId = id || null;
+  const d = id ? deals.find(x=>x.id===id) : null;
+  const wrap = document.getElementById('cafeModal');
+  wrap.querySelector('.cm-title').textContent = d ? '매물 수정' : '매물 등록';
+  wrap.querySelector('.cm-body').innerHTML = `<div style="text-align:left;">
+    <div class="grid2">
+      <div class="field"><label>지역</label><select id="dl_area" class="inline-input">
+        ${dealAreas.map(a=>`<option value="${a.id}" ${((d?.areaId)||dealAreaId)===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>매물 유형</label><select id="dl_kind" class="inline-input">
+        ${DEAL_KINDS.map(k=>`<option ${d?.kind===k?'selected':''}>${k}</option>`).join('')}
+      </select></div>
+    </div>
+    <div class="grid3" style="margin-top:8px;">
+      <div class="field"><label>층</label><input id="dl_floor" class="inline-input" type="number" value="${esc(String(d?.floor ?? ''))}" placeholder="2"></div>
+      <div class="field"><label>전용 (평) *</label><input id="dl_area_p" class="inline-input" type="number" step="0.1" value="${esc(String(d?.area ?? ''))}" placeholder="40" oninput="dealLivePer()"></div>
+      <div class="field"><label>공급 (평)</label><input id="dl_supply" class="inline-input" type="number" step="0.1" value="${esc(String(d?.supply ?? ''))}" placeholder="58.1"><div class="hint">매물에 적힌 값</div></div>
+    </div>
+    <div class="grid3" style="margin-top:8px;">
+      <div class="field"><label>보증금 (만원)</label><input id="dl_deposit" class="inline-input" type="number" value="${esc(String(d?.deposit ?? ''))}" placeholder="3000"></div>
+      <div class="field"><label>월세 (만원) *</label><input id="dl_rent" class="inline-input" type="number" value="${esc(String(d?.rent ?? ''))}" placeholder="180" oninput="dealLivePer()"></div>
+      <div class="field"><label>관리비 (만원)</label><input id="dl_mgmt" class="inline-input" type="number" value="${esc(String(d?.mgmt ?? ''))}" placeholder="0" oninput="dealLivePer()"></div>
+    </div>
+    <div id="dl_verdict" style="margin-top:10px;"></div>
+    <div class="field" style="margin-top:8px;"><label>매물 설명</label><input id="dl_memo" class="inline-input" value="${esc(d?.memo||'')}" placeholder="예: 대로변 코너, 가시성 좋음"></div>
+    <div class="grid2" style="margin-top:8px;">
+      <div class="field"><label>부동산명</label><input id="dl_agency" class="inline-input" value="${esc(d?.agency||'')}"></div>
+      <div class="field"><label>연락처</label><input id="dl_tel" class="inline-input" type="tel" inputmode="tel" value="${esc(d?.tel||'')}" placeholder="02-000-0000"></div>
+      <div class="field" style="grid-column:1/-1;"><label>매물 링크</label><input id="dl_url" class="inline-input" value="${esc(d?.url||'')}" placeholder="직접 복사한 매물 주소"></div>
+      <div class="field"><label>확인일</label><input id="dl_checked" class="inline-input" type="date" value="${esc(d?.checkedAt || todayStr())}"></div>
+    </div>
+  </div>`;
+  const del = wrap.querySelector('.cm-del');
+  del.style.display = d ? 'inline-block' : 'none';
+  del.setAttribute('onclick', `delDeal('${id||''}')`);
+  const sv = wrap.querySelector('.cm-save');
+  sv.textContent = '저장';
+  sv.setAttribute('onclick', 'saveDeal()');
+  wrap.style.display = 'flex';
+  dealLivePer();
+}
+function dealLivePer(){
+  const g = id => document.getElementById(id)?.value;
+  const box = document.getElementById('dl_verdict'); if(!box) return;
+  const v = dealVerdict({ area:Number(g('dl_area_p')), rent:Number(g('dl_rent')), mgmt:Number(g('dl_mgmt')) });
+  const col = v.ok===true?'var(--green)':v.ok===false?'var(--red)':'var(--sub)';
+  box.innerHTML = `<div style="border:1px solid ${col};border-radius:9px;padding:9px 11px;font-size:13px;">
+    <b style="color:${col};">${v.ok===true?'✅ 기준 통과':v.ok===false?'⚠️ '+esc(v.txt):'전용평수와 월세를 넣어 주세요'}</b>
+    ${v.per!=null?`<span style="color:var(--sub);"> · 평단가 <b style="color:${col};">${v.per.toFixed(2)}</b>만원/평 (기준 ${FIT_RULE.maxPerPyeong} 이하)</span>`:''}
+  </div>`;
+}
+async function saveDeal(){
+  const g = id => (document.getElementById(id)?.value || '').trim();
+  const n = id => { const v=g(id).replace(/[^0-9.]/g,''); return v===''?null:Number(v); };
+  if(!n('dl_area_p') || !n('dl_rent')){ notify('전용평수와 월세는 필수입니다.'); return; }
+  const id = dealEditId || ('dl' + Date.now());
+  const doc = {
+    id, areaId: g('dl_area') || dealAreaId, kind: g('dl_kind'),
+    floor: n('dl_floor'), area: n('dl_area_p'), supply: n('dl_supply'),
+    deposit: n('dl_deposit'), rent: n('dl_rent'), mgmt: n('dl_mgmt'),
+    memo: g('dl_memo'), agency: g('dl_agency'), tel: g('dl_tel'),
+    url: g('dl_url'), checkedAt: g('dl_checked') || todayStr(),
+    updatedBy: (fbUser&&fbUser.email)||'', updatedAt: Date.now()
+  };
+  // 같은 지역·같은 조건이면 중복 알림
+  const dup = deals.find(x=>x.id!==id && x.areaId===doc.areaId && x.area===doc.area
+                && x.rent===doc.rent && x.floor===doc.floor);
+  if(dup && !confirm('같은 조건의 매물이 이미 등록돼 있어요.\n그래도 저장할까요?')) return;
+  try{
+    await db.collection('deals').doc(id).set(doc);
+    document.getElementById('cafeModal').style.display='none';
+    dealEditId = null;
+    notify('매물을 저장했어요.');
+  }catch(e){ notify('저장 실패: ' + (e.message||'')); }
+}
+async function delDeal(id){
+  if(!id) return;
+  const d = deals.find(x=>x.id===id); if(!d) return;
+  if(!confirm('이 매물을 지울까요?')) return;
+  await db.collection('deals').doc(id).delete();
+  document.getElementById('cafeModal').style.display='none';
+  dealEditId = null;
+  notify('매물을 지웠어요.');
 }
 
 function subscribeSurvey(){
@@ -3288,10 +3922,22 @@ function renderRegionList(v){
     </header>
     <div id="naverImportPanel" style="display:none;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;">
       <div style="font-size:13px;font-weight:700;margin-bottom:6px;">네이버 책갈피 가져오기</div>
-      <div style="font-size:12.5px;color:var(--sub);line-height:1.6;margin-bottom:10px;">
-        ① 크롬에서 <b>pages.map.naver.com</b> 접속 → F12 → Console<br>
-        ② 수집 스크립트 붙여넣고 Enter → JSON 파일 자동 다운로드<br>
-        ③ 아래에서 그 파일을 선택하면 주소 기준으로 지역이 자동 분류돼 등록됩니다
+      <div style="font-size:12.5px;color:var(--sub);line-height:1.7;margin-bottom:10px;">
+        ① 크롬에서 <b>네이버 지도 → 저장 → 내 장소</b>를 연 뒤 <b>F12 → Console</b><br>
+        ② 아래 <b>[수집 스크립트 복사]</b>를 눌러 콘솔에 붙여넣고 Enter → JSON 파일이 받아집니다<br>
+        ③ 그 파일을 아래에서 선택 → 미리보기 → 등록하기<br>
+        <span style="color:var(--teal);">주소 기준으로 지역이 자동 분류되고, 라벨에 적은 점유율·조사일도 함께 읽습니다.</span>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:10px;">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px;">라벨 적는 법 (내 장소의 이름 수정)</div>
+        <div style="font-size:11.5px;color:var(--sub);line-height:1.6;">
+          <b>초심 27/50 261123</b> → 브랜드 초심 · 이용 27 / 전체 50 · 조사일 2026-11-23<br>
+          <b>르하임 폐업</b> → 폐업으로 표시 · <b>공본 52%</b> → 점유율만 기록
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" onclick="copyNaverScript()">📋 수집 스크립트 복사</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.open('https://map.naver.com/p/favorite/myPlace','_blank','noopener')">🔗 내 장소 열기</button>
       </div>
       <input type="file" id="naverJsonFile" accept=".json,application/json" style="font-size:13px;margin-bottom:8px;">
       <div id="naverImportStatus" style="font-size:12.5px;color:var(--sub);margin-bottom:8px;"></div>
@@ -3399,12 +4045,14 @@ function renderCafeList(v){
     <div id="svAutoSearch" style="display:none;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;">
       <div id="svSearchGuide"></div>
       <div id="svSearchPaste" style="display:none;margin-top:10px;">
-        <label style="font-size:12px;font-weight:600;color:var(--sub);display:block;margin-bottom:4px;">클로드 응답 JSON 붙여넣기:</label>
-        <textarea id="svPasteArea" rows="4" style="width:100%;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px;font-family:monospace;resize:vertical;" placeholder='[{"name":"...", "dong":"...", "brand":"..."},...]'></textarea>
-        <div style="display:flex;gap:8px;margin-top:8px;">
-          <button class="btn btn-primary btn-sm" onclick="parsePastedCafes()">등록하기</button>
+        <label style="font-size:12px;font-weight:600;color:var(--sub);display:block;margin-bottom:4px;">엑셀 표를 그대로 붙여넣거나, 클로드 응답 JSON을 붙여넣으세요</label>
+        <textarea id="svPasteArea" rows="5" style="width:100%;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px;font-family:monospace;resize:vertical;" placeholder="엑셀에서 머리글 포함해 복사 → 여기에 붙여넣기&#10;스카명  점유율  이용  총 개수  앱  조사일자  주소"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm" onclick="parsePastedCafes()">미리보기</button>
           <button class="btn btn-sm" onclick="document.getElementById('svAutoSearch').style.display='none'">취소</button>
+          <span style="font-size:11.5px;color:var(--sub);align-self:center;">머리글이 있으면 열 순서가 달라도 알아서 맞춥니다</span>
         </div>
+        <div id="svPastePreview" style="margin-top:10px;"></div>
       </div>
     </div>
     ${cnt===0 ? `<div style="text-align:center;padding:30px 0;">
@@ -3998,9 +4646,123 @@ async function runAutoSearch(prompt, name){
   }
 }
 
+/* ═══════════════════════════════════════════════════════════
+   엑셀 표 붙여넣기 — 탭으로 구분된 셀을 읽어 매장으로 변환합니다.
+   머리글이 있으면 열 순서가 달라도 이름으로 찾아갑니다.
+   ═══════════════════════════════════════════════════════════ */
+const COL_MAP = [
+  ['name',   ['스카명','매장명','업체명','상호','지점명','이름']],
+  ['used',   ['이용','이용중','사용중','이용 수','사용 수']],
+  ['total',  ['총 개수','총개수','총 수','전체','총']],
+  ['occ',    ['점유율','가동률','사용율','사용률']],
+  ['vendor', ['앱','벤더','키오스크','키오스크 벤더']],
+  ['date',   ['조사일자','조사일','확인일','날짜']],
+  ['addr',   ['주소','소재지','도로명주소']],
+  ['dong',   ['동','동/지역','행정동']],
+  ['brand',  ['브랜드','프랜차이즈']],
+  ['memo',   ['메모','비고','특이사항']]
+];
+function matchCol(h){
+  const t = String(h||'').replace(/\s+/g,'').toLowerCase();
+  for(const [key, names] of COL_MAP){
+    if(names.some(n=>n.replace(/\s+/g,'').toLowerCase() === t)) return key;
+  }
+  return null;
+}
+const cleanNum = v => {
+  const t = String(v??'').replace(/[^0-9.]/g,'');
+  return t === '' ? null : Number(t);
+};
+/* 엑셀 표 → 매장 배열. 못 읽은 줄은 skipped 에 이유와 함께 담습니다. */
+function parseTable(raw){
+  const lines = String(raw||'').split(/\r?\n/).filter(l=>l.trim() !== '');
+  if(!lines.length) return null;
+  const split = l => l.split('\t').map(c=>c.trim());
+  let head = split(lines[0]);
+  let keys = head.map(matchCol);
+  let start = 1;
+  // 머리글이 없으면 시트 기본 순서로 가정
+  if(keys.filter(Boolean).length < 2){
+    keys = ['name','occ','used','total','vendor','date','addr'];
+    start = 0;
+  }
+  const rows = [], skipped = [];
+  for(let i = start; i < lines.length; i++){
+    const cells = split(lines[i]);
+    const o = {};
+    keys.forEach((k, j)=>{ if(k) o[k] = cells[j]; });
+    const name = String(o.name||'').trim();
+    if(!name){ continue; }                                   // 빈 줄은 조용히 넘김
+    if(/^#(DIV\/0!|N\/A|VALUE!|REF!)/i.test(name)) continue;  // 엑셀 오류 셀
+    const used = cleanNum(o.used), total = cleanNum(o.total);
+    const vendor = normVendor(o.vendor);
+    const r = { name, vendor,
+      dong: String(o.dong||'').trim(), brand: String(o.brand||'').trim(),
+      addr: String(o.addr||'').trim(), memo: String(o.memo||'').trim(),
+      lockerUsed: used, lockerTotal: total,
+      lockerDate: /^\d{4}-\d{2}-\d{2}$/.test(String(o.date||'').trim()) ? String(o.date).trim() : '' };
+    if(total == null || used == null){
+      // 숫자가 없으면 미조사 매장으로 등록 (오픈 준비 · 앱 없음 등)
+      r.lockerUsed = ''; r.lockerTotal = '';
+      skipped.push({ name, why: String(o.vendor||'').trim().toUpperCase()==='X' ? '앱 없음 — 점유율 미확인' : '점유율 숫자 없음 — 미조사로 등록' });
+    }
+    rows.push(r);
+  }
+  return { rows, skipped };
+}
+/* 미리보기 — 등록 전에 무엇이 들어갈지 보여줍니다 */
+function previewTable(parsed){
+  const box = document.getElementById('svPastePreview'); if(!box) return;
+  const { rows, skipped } = parsed;
+  const withOcc = rows.filter(r=>r.lockerTotal !== '' && r.lockerTotal != null).length;
+  const noAddr  = rows.filter(r=>!r.addr).length;
+  const dups    = rows.filter(r=>cafes.some(c=>c.regionId===svRegionId && cafeCore(c.name)===cafeCore(r.name))).length;
+  window._pendingTable = rows;
+  box.innerHTML = `<div style="border:1px solid var(--teal);border-radius:10px;padding:11px 13px;">
+    <div style="font-size:13px;font-weight:700;color:var(--teal);margin-bottom:8px;">
+      ${rows.length}곳을 읽었습니다 — 점유율 있음 ${withOcc}곳 · 미조사 ${rows.length-withOcc}곳
+    </div>
+    ${dups ? `<div style="font-size:12px;color:var(--red);margin-bottom:6px;">⚠️ 이미 등록된 이름 ${dups}곳 — 등록 시 자동으로 제외됩니다</div>` : ''}
+    ${noAddr ? `<div style="font-size:12px;color:var(--amber, #B8860B);margin-bottom:6px;">📍 주소 없음 ${noAddr}곳 — 지도에 표시되지 않습니다</div>` : ''}
+    <div style="max-height:150px;overflow:auto;font-size:12px;">
+      ${rows.slice(0,12).map(r=>{
+        const o = (r.lockerUsed!=='' && r.lockerTotal) ? Math.round(r.lockerUsed/r.lockerTotal*100)+'%' : '미조사';
+        return `<div style="display:flex;gap:8px;padding:2px 0;">
+          <span style="flex:1;">${esc(r.name)}</span>
+          <b style="min-width:48px;text-align:right;">${o}</b>
+          <span style="color:var(--sub);min-width:70px;text-align:right;">${esc(r.vendor)}</span>
+          <span style="color:${r.addr?'var(--sub)':'var(--red)'};min-width:34px;text-align:right;">${r.addr?'주소✓':'없음'}</span>
+        </div>`;
+      }).join('')}
+      ${rows.length>12?`<div style="color:var(--sub);padding-top:4px;">… 외 ${rows.length-12}곳</div>`:''}
+    </div>
+    ${skipped.length?`<div style="font-size:11.5px;color:var(--sub);margin-top:7px;">점유율 없이 등록되는 ${skipped.length}곳: ${esc(skipped.slice(0,4).map(x=>x.name).join(', '))}${skipped.length>4?' 외':''}</div>`:''}
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button class="btn btn-primary btn-sm" onclick="commitTable()">${rows.length}곳 등록하기</button>
+      <button class="btn btn-sm" onclick="document.getElementById('svPastePreview').innerHTML=''">다시</button>
+    </div>
+  </div>`;
+}
+async function commitTable(){
+  const rows = window._pendingTable || [];
+  if(!rows.length) return;
+  const res = await registerCafes(rows);
+  document.getElementById('svPastePreview').innerHTML = '';
+  document.getElementById('svPasteArea').value = '';
+  notify(res.ok ? `${res.added}곳 등록 완료${res.dupes?` (중복 ${res.dupes}곳 제외)`:''}` : res.msg);
+  if(res.ok) document.getElementById('svAutoSearch').style.display = 'none';
+}
+
 async function parsePastedCafes(){
   const raw = document.getElementById('svPasteArea').value.trim();
-  if(!raw){ notify('JSON을 붙여넣어 주세요.'); return; }
+  if(!raw){ notify('엑셀 표나 JSON을 붙여넣어 주세요.'); return; }
+  // 탭이 있으면 엑셀 표로 봅니다
+  if(raw.includes('\t')){
+    const parsed = parseTable(raw);
+    if(!parsed || !parsed.rows.length){ notify('읽을 수 있는 줄이 없어요. 머리글을 포함해 다시 복사해 주세요.'); return; }
+    previewTable(parsed);
+    return;
+  }
   const arr = repairJSON(raw);
   if(!arr || !Array.isArray(arr) || !arr.length){
     notify('JSON 형식을 인식할 수 없어요. 클로드 응답을 그대로 복사해서 붙여넣어 주세요.');
@@ -4043,6 +4805,54 @@ async function registerCafes(arr){
 }
 
 /* ---------- 네이버 책갈피 가져오기 ---------- */
+/* 네이버 지도 「내 장소」에서 저장한 장소를 JSON 으로 내려받는 스크립트.
+   사용자가 자기 계정으로 로그인한 브라우저에서 직접 실행합니다. */
+const NAVER_COLLECT_SCRIPT = `(async()=>{
+  const out=[], seen=new Set();
+  const pick=(o,...k)=>{for(const x of k){const v=o&&o[x];if(v!=null&&v!=='')return v;}return '';};
+  const dig=(node,depth)=>{
+    if(!node||depth>8)return;
+    if(Array.isArray(node)){node.forEach(n=>dig(n,depth+1));return;}
+    if(typeof node!=='object')return;
+    const name=pick(node,'name','placeName','title');
+    const addr=pick(node,'address','roadAddress','mappedAddress','addressAbbr');
+    const sid=String(pick(node,'sid','placeId','id','bookmarkId'));
+    if(name&&addr&&!seen.has(sid+name)){
+      seen.add(sid+name);
+      out.push({sid, name:String(name).replace(/<[^>]*>/g,''),
+        displayName:String(pick(node,'displayName','memo','name')).replace(/<[^>]*>/g,''),
+        address:String(addr), mappedAddress:String(pick(node,'mappedAddress','roadAddress')),
+        lat:Number(pick(node,'y','lat','latitude'))||null,
+        lng:Number(pick(node,'x','lng','longitude'))||null,
+        memo:String(pick(node,'memo','description')), folder:String(pick(node,'folderName','folder'))});
+    }
+    Object.values(node).forEach(v=>dig(v,depth+1));
+  };
+  // 화면에 이미 올라온 데이터에서 수집
+  [window.__APOLLO_STATE__, window.__PRELOADED_STATE__, window.__NEXT_DATA__].forEach(x=>dig(x,0));
+  // 부족하면 즐겨찾기 API 를 직접 호출
+  if(out.length<3){
+    for(let page=0;page<20;page++){
+      try{
+        const r=await fetch('/p/api/favorite/places?start='+(page*100+1)+'&display=100',{credentials:'include'});
+        if(!r.ok)break;
+        const j=await r.json(); const before=out.length; dig(j,0);
+        if(out.length===before)break;
+      }catch(e){break;}
+    }
+  }
+  if(!out.length){alert('수집된 장소가 없습니다. 내 장소 목록이 화면에 보이는 상태에서 다시 실행해 주세요.');return;}
+  const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download='naver-myplace.json'; a.click();
+  console.log('수집 완료:', out.length, '건');
+  alert(out.length+'건을 모았습니다. 다운로드된 naver-myplace.json 을 명당에 올려 주세요.');
+})();`;
+
+function copyNaverScript(){
+  copyText(NAVER_COLLECT_SCRIPT, '수집 스크립트를 복사했어요 — 네이버 지도 콘솔에 붙여넣고 Enter를 누르세요.');
+}
+
 function toggleNaverImport(){
   const p = document.getElementById('naverImportPanel');
   if(p) p.style.display = p.style.display === 'none' ? 'block' : 'none';
@@ -4430,6 +5240,9 @@ function addCafe(){ cafeEditId=null; openCafeModal(null); }
 function editCafe(id){ cafeEditId=id; openCafeModal(cafes.find(c=>c.id===id)); }
 function openCafeModal(c){
   const wrap = document.getElementById('cafeModal');
+  // 매물 폼에서 바뀌었을 수 있는 버튼 동작을 매장용으로 되돌립니다
+  wrap.querySelector('.cm-save').setAttribute('onclick','saveCafe()');
+  wrap.querySelector('.cm-del').setAttribute('onclick','deleteCafe()');
   wrap.querySelector('.cm-title').textContent = c ? '매장 수정' : '매장 추가';
   wrap.querySelector('.cm-body').innerHTML = cafeFormHTML(c);
   wrap.querySelector('.cm-del').style.display = c ? 'inline-block' : 'none';
