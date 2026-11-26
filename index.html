@@ -1538,7 +1538,7 @@ function repairAndParse(raw){
    ═══════════════════════════════════════════════════════════ */
 /* 배포된 파일이 최신인지 확인하는 표시입니다.
    브라우저 콘솔에 MD_VERSION 을 입력하면 바로 볼 수 있습니다. */
-const MD_VERSION = 'v20 · 2026-11-23 · 배후수요 합격기준 8항목';
+const MD_VERSION = 'v21 · 2026-11-23 · 매물·지역 삭제';
 try{ window.MD_VERSION = MD_VERSION; console.log('명당 ' + MD_VERSION); }catch(_){}
 
 const AI_PROXY_URL  = 'https://myeongdang-ai.yjyu.workers.dev';
@@ -3548,6 +3548,7 @@ function renderDeals(){
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="btn btn-ghost btn-sm" onclick="openNaverLand('${dealAreaId}')">🔎 네이버 부동산에서 찾기</button>
           <button class="btn btn-ghost btn-sm" onclick="editDealArea('${dealAreaId}')">조건 수정</button>
+          ${mine.length===0?`<button class="btn btn-ghost btn-sm" onclick="delDealArea('${dealAreaId}')" style="color:var(--red);">지역 삭제</button>`:''}
         </div>
       </div>
       <div class="totals" style="margin-top:12px;">
@@ -3598,6 +3599,7 @@ function renderDeals(){
           ${d.tel?`<a class="btn btn-ghost btn-sm" href="tel:${esc(String(d.tel).replace(/[^0-9+]/g,''))}">📞 ${esc(d.agency||'부동산')}</a>`:''}
           <button class="btn btn-ghost btn-sm" onclick="touchDeal('${d.id}')">오늘 확인</button>
           <button class="btn btn-ghost btn-sm" onclick="openDealForm('${d.id}')">수정</button>
+          <button class="btn btn-ghost btn-sm" onclick="delDeal('${d.id}')" style="color:var(--red);">삭제</button>
           <button class="btn btn-ghost btn-sm" onclick="dealToSite('${d.id}')" style="color:var(--teal);">후보지로 보내기 →</button>
         </div>
       </div>`;
@@ -3718,6 +3720,8 @@ function openDealForm(id){
   </div>`;
   const del = wrap.querySelector('.cm-del');
   del.style.display = d ? 'inline-block' : 'none';
+  del.textContent = '삭제';
+  del.style.background = ''; del.style.color = '';
   del.setAttribute('onclick', `delDeal('${id||''}')`);
   const sv = wrap.querySelector('.cm-save');
   sv.textContent = '저장';
@@ -3762,11 +3766,30 @@ async function saveDeal(){
 async function delDeal(id){
   if(!id) return;
   const d = deals.find(x=>x.id===id); if(!d) return;
-  if(!confirm('이 매물을 지울까요?')) return;
-  await db.collection('deals').doc(id).delete();
-  document.getElementById('cafeModal').style.display='none';
-  dealEditId = null;
-  notify('매물을 지웠어요.');
+  const per = dealPer(d);
+  const desc = `${d.kind||'상가'} ${d.floor?d.floor+'층':''} · 전용 ${d.area??'—'}평 · 월세 ${won(d.rent)}`
+    + (per!=null?` · 평단가 ${per.toFixed(2)}`:'');
+  if(!confirm(`아래 매물을 지울까요?\n\n${desc}\n\n되돌릴 수 없습니다.`)) return;
+  try{
+    await db.collection('deals').doc(id).delete();
+    const m = document.getElementById('cafeModal');
+    if(m) m.style.display = 'none';
+    dealEditId = null;
+    notify('매물을 지웠어요.');
+  }catch(e){ notify('삭제 실패: ' + (e.message||'')); }
+}
+
+/* 지역 삭제 — 매물이 남아 있으면 막습니다 */
+async function delDealArea(id){
+  const a = dealAreas.find(x=>x.id===id); if(!a) return;
+  const n = deals.filter(d=>d.areaId===id).length;
+  if(n > 0){ notify(`"${a.name}" 에 매물 ${n}건이 있어 지울 수 없어요. 매물을 먼저 정리해 주세요.`); return; }
+  if(!confirm(`"${a.name}" 지역을 목록에서 지울까요?\n\n등록된 매물이 없어 잃을 데이터는 없습니다.`)) return;
+  try{
+    await db.collection('dealAreas').doc(id).delete();
+    if(dealAreaId === id) dealAreaId = '';
+    notify(`${a.name} 을(를) 지웠어요.`);
+  }catch(e){ notify('삭제 실패: ' + (e.message||'')); }
 }
 
 function subscribeSurvey(){
