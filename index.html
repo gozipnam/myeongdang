@@ -395,13 +395,14 @@
     </div>
 
     <div class="form-card">
-      <h2>매물 출처</h2>
-      <div class="desc">어디서 본 매물인지 남겨두면 다시 찾을 때와 연락할 때 편합니다.</div>
+      <h2>매물 출처 · 중개사</h2>
+      <div class="desc">여기 적은 내용은 「상세 · 현장조사」 화면의 중개사 정보와 같은 자리입니다. 한 곳에서 고치면 양쪽에 반영됩니다.</div>
       <div class="grid3" style="margin-top:8px;">
-        <div class="field"><label>부동산명</label><input id="f_agency" placeholder="예: 다산OO공인중개사"></div>
-        <div class="field"><label>연락처</label><input id="f_agencyTel" type="tel" inputmode="tel" placeholder="031-000-0000"><div class="hint">저장하면 카드에서 바로 전화를 걸 수 있습니다</div></div>
-        <div class="field"><label>확인일</label><input id="f_listedAt" type="date"></div>
-        <div class="field" style="grid-column:1/-1;"><label>매물 링크</label><input id="f_listingUrl" placeholder="네이버 부동산 등 매물 주소를 붙여넣기"><div class="hint">직접 복사한 링크만 저장됩니다</div></div>
+        <div class="field"><label>중개사무소</label><input id="f_agency" placeholder="예: 다산OO공인중개사"></div>
+        <div class="field"><label>담당자</label><input id="f_brokerName" placeholder="홍길동 실장"></div>
+        <div class="field"><label>연락처</label><input id="f_agencyTel" type="tel" inputmode="tel" placeholder="031-000-0000"><div class="hint">카드에서 바로 전화를 걸 수 있습니다</div></div>
+        <div class="field"><label>매물 확인일</label><input id="f_listedAt" type="date"></div>
+        <div class="field" style="grid-column:2/-1;"><label>매물 링크</label><input id="f_listingUrl" placeholder="네이버 부동산 등 매물 주소를 붙여넣기"><div class="hint">직접 복사한 링크만 저장됩니다</div></div>
       </div>
     </div>
 
@@ -953,7 +954,7 @@ function render(){
         <button class="btn btn-ghost btn-sm" onclick="toggleDetail('${s.id}')">${open?'접기':'상세 · 현장조사'}</button>
         <button class="btn btn-ghost btn-sm" onclick="openReport('${s.id}')">보고서</button>
         ${s.addr?`<button class="btn btn-ghost btn-sm" onclick="toggleSiteMap('${s.id}')">🗺️ 지도</button>`:''}
-        ${s.agencyTel?`<a class="btn btn-ghost btn-sm" href="tel:${esc(s.agencyTel.replace(/[^0-9+]/g,''))}" onclick="event.stopPropagation()">📞 ${esc(s.agency||'부동산')}</a>`:''}
+        ${(s.broker?.phone||s.agencyTel)?`<a class="btn btn-ghost btn-sm" href="tel:${esc(String(s.broker?.phone||s.agencyTel).replace(/[^0-9+]/g,''))}" onclick="event.stopPropagation()">📞 ${esc(s.broker?.office||s.agency||'부동산')}</a>`:''}
         ${s.listingUrl?`<a class="btn btn-ghost btn-sm" href="${esc(s.listingUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🔗 매물</a>`:''}
         <button class="btn btn-ghost btn-sm" onclick="openForm('${s.id}')">수정</button>
         <button class="btn btn-danger btn-sm ${pendingDelete===s.id?'confirm':''}" onclick="delSite('${s.id}')">${pendingDelete===s.id?'정말 삭제할까요?':'삭제'}</button>
@@ -1278,10 +1279,15 @@ function detailHTML(s,c){
     </div>
 
     <div class="sec-title">중개사 정보</div>
+    <div style="font-size:11.5px;color:var(--sub);margin-bottom:7px;">
+      등록 화면의 「매물 출처 · 중개사」와 같은 자리입니다. 여기서 고치면 카드와 보고서에도 바로 반영됩니다.
+      ${s.listingUrl?` · <a href="${esc(s.listingUrl)}" target="_blank" rel="noopener" style="color:var(--teal);font-weight:600;">🔗 매물 링크 열기</a>`:''}
+      ${s.listedAt?` · 매물 확인일 ${esc(s.listedAt)}`:''}
+    </div>
     <div class="broker-grid">
-      <div><label style="display:block;font-size:11.5px;font-weight:600;color:var(--sub);margin-bottom:3px;">중개사무소</label><input class="inline-input" value="${esc(s.broker?.office||'')}" placeholder="○○공인중개사" onchange="saveBroker('${s.id}','office',this.value)"></div>
+      <div><label style="display:block;font-size:11.5px;font-weight:600;color:var(--sub);margin-bottom:3px;">중개사무소</label><input class="inline-input" value="${esc(s.broker?.office || s.agency || '')}" placeholder="○○공인중개사" onchange="saveBroker('${s.id}','office',this.value)"></div>
       <div><label style="display:block;font-size:11.5px;font-weight:600;color:var(--sub);margin-bottom:3px;">담당자 이름</label><input class="inline-input" value="${esc(s.broker?.name||'')}" placeholder="홍길동 실장" onchange="saveBroker('${s.id}','name',this.value)"></div>
-      <div><label style="display:block;font-size:11.5px;font-weight:600;color:var(--sub);margin-bottom:3px;">연락처</label><input class="inline-input" type="tel" value="${esc(s.broker?.phone||'')}" placeholder="010-0000-0000" onchange="saveBroker('${s.id}','phone',this.value)">${s.broker?.phone?`<a href="tel:${esc(s.broker.phone)}" style="font-size:12px;color:var(--teal);font-weight:600;">📞 바로 전화</a>`:''}</div>
+      <div><label style="display:block;font-size:11.5px;font-weight:600;color:var(--sub);margin-bottom:3px;">연락처</label><input class="inline-input" type="tel" value="${esc(s.broker?.phone || s.agencyTel || '')}" placeholder="010-0000-0000" onchange="saveBroker('${s.id}','phone',this.value)">${(s.broker?.phone||s.agencyTel)?`<a href="tel:${esc(String(s.broker?.phone||s.agencyTel).replace(/[^0-9+]/g,''))}" style="font-size:12px;color:var(--teal);font-weight:600;">📞 바로 전화</a>`:''}</div>
     </div>
     <div style="font-size:11.5px;font-weight:600;color:var(--sub);margin-bottom:5px;">명함 보관</div>
     <div id="namecard-${s.id}" style="margin-bottom:4px;"></div>
@@ -1413,8 +1419,11 @@ async function saveBroker(id, key, val){
   const s = sites.find(x=>x.id===id); if(!s) return;
   if(!s.broker) s.broker = {};
   s.broker[key] = val.trim();
+  // 카드·보고서가 쓰는 사본을 같은 값으로 맞춰 둡니다 (중복 표기 방지)
+  if(key === 'office') s.agency = s.broker.office;
+  if(key === 'phone')  s.agencyTel = s.broker.phone;
   await persist();
-  if(key === 'phone') render(); // '바로 전화' 링크 갱신
+  render();
 }
 let compEditIdx = null; // 경쟁업체 수정 중인 인덱스
 async function addCompetitor(id){
@@ -1538,7 +1547,7 @@ function repairAndParse(raw){
    ═══════════════════════════════════════════════════════════ */
 /* 배포된 파일이 최신인지 확인하는 표시입니다.
    브라우저 콘솔에 MD_VERSION 을 입력하면 바로 볼 수 있습니다. */
-const MD_VERSION = 'v23 · 2026-11-24 · 인천 개편 도우미';
+const MD_VERSION = 'v24 · 2026-11-24 · 중개사 정보 통합';
 try{ window.MD_VERSION = MD_VERSION; console.log('명당 ' + MD_VERSION); }catch(_){}
 
 const AI_PROXY_URL  = 'https://myeongdang-ai.yjyu.workers.dev';
@@ -2952,10 +2961,11 @@ function reportText(s,c){
     if(acq.perSeat!=null) lines.push(`- 좌석당 매출 ${won(Math.round(acq.perSeat))}/월${acq.age!=null?` | 사용연수 ${acq.age}년`:''}`);
   }
 
-  if(s.agency || s.agencyTel || s.listingUrl){
+  if(s.broker?.office || s.broker?.phone || s.agency || s.agencyTel || s.listingUrl){
     lines.push(``);
     lines.push(`매물 출처`);
-    if(s.agency || s.agencyTel) lines.push(`- ${s.agency||'부동산'}${s.agencyTel?` | ${s.agencyTel}`:''}${s.listedAt?` | 확인 ${s.listedAt}`:''}`);
+    const bo = s.broker?.office || s.agency, bp = s.broker?.phone || s.agencyTel, bn = s.broker?.name;
+    if(bo || bp) lines.push(`- ${bo||'부동산'}${bn?` ${bn}`:''}${bp?` | ${bp}`:''}${s.listedAt?` | 확인 ${s.listedAt}`:''}`);
     if(s.listingUrl) lines.push(`- 매물 링크 : ${s.listingUrl}`);
   }
 
@@ -3053,7 +3063,10 @@ function openForm(id){
   set('f_apt', s?.apt); set('f_compRev', s?.compRev);
   set('f_distSubway', s?.distSubway); set('f_distCore', s?.distCore);
   set('f_subwayName', s?.subwayName); set('f_aptPrice', s?.aptPrice);
-  set('f_agency', s?.agency); set('f_agencyTel', s?.agencyTel);
+  // 중개사 정보는 broker 가 기준입니다. 예전에 매물 출처로만 적은 값은 보조로 읽습니다.
+  set('f_agency',     s?.broker?.office ?? s?.agency);
+  set('f_brokerName', s?.broker?.name);
+  set('f_agencyTel',  s?.broker?.phone  ?? s?.agencyTel);
   set('f_listingUrl', s?.listingUrl); set('f_listedAt', s?.listedAt);
   set('f_nego', s?.nego||'unknown'); set('f_elev', s?.elev||'y'); set('f_park', s?.park||'y'); set('f_h24', s?.h24||'unknown');
   set('f_hs', s?.hs); set('f_ms', s?.ms);
@@ -3090,7 +3103,8 @@ function formData(){
     apt: num(g('f_apt')), compRev: num(g('f_compRev')),
     distSubway: num(g('f_distSubway')), distCore: num(g('f_distCore')),
     subwayName: g('f_subwayName').trim(), aptPrice: num(g('f_aptPrice')),
-    agency: g('f_agency').trim(), agencyTel: g('f_agencyTel').trim(),
+    broker: { office: g('f_agency').trim(), name: g('f_brokerName').trim(), phone: g('f_agencyTel').trim() },
+    agency: g('f_agency').trim(), agencyTel: g('f_agencyTel').trim(),   // 카드·보고서 호환용 사본
     listingUrl: g('f_listingUrl').trim(), listedAt: g('f_listedAt'),
     elev: g('f_elev'), park: g('f_park'), h24: g('f_h24'),
     hs: num(g('f_hs')), ms: num(g('f_ms')),
@@ -3650,7 +3664,7 @@ function dealToSite(id){
     set('f_name', `${a?a.name+' ':''}${d.kind||'상가'} ${d.floor?d.floor+'층':''}`.trim());
     set('f_floor', d.floor); set('f_area', d.area);
     set('f_deposit', d.deposit); set('f_rent', d.rent); set('f_mgmt', d.mgmt);
-    set('f_agency', d.agency); set('f_agencyTel', d.tel);
+    set('f_agency', d.agency); set('f_agencyTel', d.tel); set('f_brokerName', '');
     set('f_listingUrl', d.url); set('f_listedAt', d.checkedAt);
     if(typeof liveCalc === 'function') liveCalc();
     notify('매물 정보를 후보지 등록 화면으로 옮겼어요. 나머지를 채워 주세요.');
